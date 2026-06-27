@@ -29,6 +29,16 @@ const HELP_TOPICS = [
     label: "Spread",
     text: "Best ask minus best bid, measured in basis points. Wider spread often means thinner or less stable liquidity.",
   },
+  {
+    id: "openInterest",
+    label: "Open interest",
+    text: "Current Binance Futures open interest converted to quote notional with the sampled mark price.",
+  },
+  {
+    id: "premium",
+    label: "Premium",
+    text: "Mark price minus index price, measured in basis points. Positive values mean the perp mark is above the index.",
+  },
 ];
 
 function formatCompactUsd(value) {
@@ -57,6 +67,12 @@ function formatDecimal(value, digits = 3) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
+}
+
+function formatBps(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number >= 0 ? "+" : ""}${number.toFixed(2)} bps`;
 }
 
 function formatUtc(value) {
@@ -108,18 +124,26 @@ function buildTooltip(params) {
   }
 
   return `
-    <div style="min-width:220px">
+    <div style="min-width:240px">
       <div style="font-weight:700;margin-bottom:6px">${formatUtc(time)}</div>
       ${row("BTC price", "BTC price", formatPrice)}
       ${row("Net taker", "Net taker", formatCompactUsd)}
       ${row("Taker imbalance", "Taker imbalance", (value) => formatDecimal(value, 3))}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
-      ${row("Spread", "Spread", (value) => `${formatDecimal(value, 2)} bps`)}
+      ${row("Spread", "Spread", formatBps)}
+      ${row("Open interest", "Open interest", formatCompactUsd)}
+      ${row("Premium", "Premium", formatBps)}
     </div>
   `;
 }
 
-export default function MarketMicrostructureChart({ marketStart, marketEnd, priceSeries, buckets }) {
+export default function MarketMicrostructureChart({
+  marketStart,
+  marketEnd,
+  priceSeries,
+  buckets,
+  positionSeries = [],
+}) {
   const chartRef = useRef(null);
   const [activeHelpId, setActiveHelpId] = useState(null);
   const activeHelp = HELP_TOPICS.find((topic) => topic.id === activeHelpId);
@@ -137,6 +161,13 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
         spread: finiteNumber(bucket.spread_bps),
       }))
       .filter((bucket) => bucket.time !== null);
+    const positionRows = positionSeries
+      .map((sample) => ({
+        time: toTimeValue(sample.time),
+        openInterestQuote: finiteNumber(sample.open_interest_quote),
+        premiumBps: finiteNumber(sample.premium_bps),
+      }))
+      .filter((sample) => sample.time !== null);
 
     const netTakerData = bucketRows
       .filter((bucket) => bucket.netTaker !== null)
@@ -150,6 +181,12 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
     const spreadData = bucketRows
       .filter((bucket) => bucket.spread !== null)
       .map((bucket) => [bucket.time, bucket.spread]);
+    const openInterestData = positionRows
+      .filter((sample) => sample.openInterestQuote !== null)
+      .map((sample) => [sample.time, sample.openInterestQuote]);
+    const premiumData = positionRows
+      .filter((sample) => sample.premiumBps !== null)
+      .map((sample) => [sample.time, sample.premiumBps]);
 
     const start = toTimeValue(marketStart);
     const end = toTimeValue(marketEnd);
@@ -157,7 +194,7 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
     return {
       animation: false,
       backgroundColor: "#fbfcfe",
-      color: ["#175cd3", "#067647", "#b42318", "#7a5af8", "#b54708"],
+      color: ["#175cd3", "#067647", "#b42318", "#7a5af8", "#b54708", "#0e7490", "#c11574"],
       legend: {
         top: 6,
         left: 10,
@@ -173,10 +210,10 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
         formatter: buildTooltip,
       },
       dataZoom: [
-        { type: "inside", xAxisIndex: [0, 1, 2], filterMode: "none" },
+        { type: "inside", xAxisIndex: [0, 1, 2, 3], filterMode: "none" },
         {
           type: "slider",
-          xAxisIndex: [0, 1, 2],
+          xAxisIndex: [0, 1, 2, 3],
           filterMode: "none",
           bottom: 10,
           height: 22,
@@ -187,11 +224,12 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
       ],
       axisPointer: { link: [{ xAxisIndex: "all" }] },
       grid: [
-        { left: 78, right: 72, top: 50, height: 190 },
-        { left: 78, right: 72, top: 282, height: 105 },
-        { left: 78, right: 72, top: 430, height: 125 },
+        { left: 78, right: 72, top: 50, height: 180 },
+        { left: 78, right: 72, top: 270, height: 100 },
+        { left: 78, right: 72, top: 410, height: 115 },
+        { left: 78, right: 72, top: 565, height: 110 },
       ],
-      xAxis: [0, 1, 2].map((gridIndex) => ({
+      xAxis: [0, 1, 2, 3].map((gridIndex) => ({
         type: "time",
         gridIndex,
         min: start || undefined,
@@ -235,7 +273,22 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
           type: "value",
           gridIndex: 2,
           position: "right",
-          axisLabel: { color: "#b54708", formatter: (value) => `${Number(value).toFixed(2)} bps` },
+          axisLabel: { color: "#b54708", formatter: formatBps },
+          splitLine: { show: false },
+        },
+        {
+          type: "value",
+          gridIndex: 3,
+          scale: true,
+          axisLabel: { color: "#0e7490", formatter: formatCompactUsd },
+          splitLine: { lineStyle: { color: "#edf2f7" } },
+        },
+        {
+          type: "value",
+          gridIndex: 3,
+          position: "right",
+          scale: true,
+          axisLabel: { color: "#c11574", formatter: formatBps },
           splitLine: { show: false },
         },
       ],
@@ -290,9 +343,27 @@ export default function MarketMicrostructureChart({ marketStart, marketEnd, pric
           showSymbol: false,
           lineStyle: { color: "#b54708", width: 1.5, type: "dashed" },
         },
+        {
+          name: "Open interest",
+          type: "line",
+          xAxisIndex: 3,
+          yAxisIndex: 4,
+          data: openInterestData,
+          showSymbol: false,
+          lineStyle: { color: "#0e7490", width: 1.8 },
+        },
+        {
+          name: "Premium",
+          type: "line",
+          xAxisIndex: 3,
+          yAxisIndex: 5,
+          data: premiumData,
+          showSymbol: false,
+          lineStyle: { color: "#c11574", width: 1.5, type: "dashed" },
+        },
       ],
     };
-  }, [buckets, marketEnd, marketStart, priceSeries]);
+  }, [buckets, marketEnd, marketStart, positionSeries, priceSeries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;

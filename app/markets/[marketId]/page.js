@@ -468,6 +468,12 @@ export default async function MarketDetailPage({ params }) {
     book_imbalance_5bps: Number(bucket.book_imbalance_5bps),
     spread_bps: Number(bucket.spread_bps),
   }));
+  const chartPositionSeries = data.positionSeries.map((sample) => ({
+    time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
+    open_interest_quote: Number(sample.open_interest_quote),
+    premium_bps: Number(sample.premium_bps),
+    funding_rate: Number(sample.funding_rate),
+  }));
 
   return (
     <main className="dashboard-shell market-detail-shell">
@@ -506,7 +512,7 @@ export default async function MarketDetailPage({ params }) {
         <div className="panel-heading">
           <div>
             <p className="panel-label">BTC futures price</p>
-            <h2>Price, taker flow, book imbalance, and spread</h2>
+            <h2>Price, taker flow, book imbalance, spread, and positioning</h2>
           </div>
           <span className="status-pill status-muted">{chartPriceSeries.length} samples</span>
         </div>
@@ -515,6 +521,7 @@ export default async function MarketDetailPage({ params }) {
           marketEnd={data.market.end_time instanceof Date ? data.market.end_time.toISOString() : data.market.end_time}
           priceSeries={chartPriceSeries}
           buckets={chartBuckets}
+          positionSeries={chartPositionSeries}
         />
       </section>
 

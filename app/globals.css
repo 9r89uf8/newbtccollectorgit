@@ -798,13 +798,13 @@ td strong {
 
 .echarts-market-chart {
   width: max(1080px, 100%);
-  height: 620px;
+  height: 740px;
 }
 
 @media (max-width: 760px) {
   .echarts-market-chart {
     width: 1080px;
-    height: 620px;
+    height: 740px;
   }
 }
 

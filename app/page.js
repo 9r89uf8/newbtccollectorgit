@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getDashboardData } from "@/lib/dashboardData.js";
 export const dynamic = "force-dynamic";
 
@@ -211,7 +212,7 @@ function MarketRows({ markets }) {
                     <td>
                       {index === 0 ? (
                         <div>
-                          <strong>{formatUtc(market.start_time)}</strong>
+                          <Link className="market-link" href={`/markets/${encodeURIComponent(market.id)}`}>{formatUtc(market.start_time)}</Link>
                           <span className="subtext">{market.symbol}</span>
                         </div>
                       ) : null}
@@ -268,7 +269,7 @@ function FeaturePanel({ featureStats, recentFeatures }) {
               <article className="feature-item" key={`${feature.market_id}-${feature.source}`}>
                 <div className="feature-item-top">
                   <div>
-                    <strong>{formatUtc(feature.start_time)}</strong>
+                    <Link className="market-link" href={`/markets/${encodeURIComponent(feature.market_id)}`}>{formatUtc(feature.start_time)}</Link>
                     <span>{feature.source}</span>
                   </div>
                   <span className={`status-pill ${statusClass(feature.feature_quality)}`}>{feature.feature_quality}</span>
@@ -320,7 +321,7 @@ function FeatureBucketPanel({ buckets }) {
             <article className="bucket-item" key={`${bucket.market_id}-${bucket.source}-${bucket.bucket_start}`}>
               <div className="feature-item-top">
                 <div>
-                  <strong>{formatUtc(bucket.bucket_start)}</strong>
+                  <Link className="market-link" href={`/markets/${encodeURIComponent(bucket.market_id)}`}>{formatUtc(bucket.bucket_start)}</Link>
                   <span>{Number(bucket.bucket_seconds).toFixed(0)}s window</span>
                 </div>
                 <span className={`status-pill ${statusClass(bucket.bucket_quality)}`}>{bucket.bucket_quality}</span>

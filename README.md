@@ -46,6 +46,12 @@ npm run collector
 
 Open `http://localhost:3000`.
 
+Click a market timestamp in the dashboard to open its dedicated detail page at:
+
+```text
+/markets/<market_id>
+```
+
 ## Collector schedule
 
 Each BTCUSDT market is a 5 minute UTC window.

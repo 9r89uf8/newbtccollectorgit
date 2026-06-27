@@ -1,11 +1,11 @@
 # Add Ons: Futures Microstructure V1
 
-This repo now implements the first two data additions:
+This repo implements the first two data additions:
 
 1. Binance Futures aggregate trades for aggressive buy/sell flow.
 2. Binance Futures top-20 order book depth for available liquidity.
 
-The implementation is intentionally split across small collector modules instead of one large collector file.
+It also derives per-timestamp bucket summaries so the dashboard can show what was happening at a specific point inside each 5 minute market.
 
 ## Implemented Files
 
@@ -22,31 +22,48 @@ The implementation is intentionally split across small collector modules instead
 | `collector/aggTrades.mjs` | Futures aggregate trade pagination and raw inserts. |
 | `collector/marketLabels.mjs` | Open/close labels. |
 | `collector/marketFeatures.mjs` | Per-market trade-flow and book-liquidity features. |
+| `collector/marketFeatureBuckets.mjs` | Per-timestamp interval summaries inside each market. |
 
 ## Data Tables
 
-The schema adds three tables:
+The schema adds these microstructure tables:
 
 ```text
 agg_trades
 book_samples
 market_features
+market_feature_buckets
 ```
 
-`agg_trades` stores raw futures aggregate trades with one row per Binance aggregate trade id.
+`agg_trades` stores raw futures aggregate trades.
 
-`book_samples` stores derived top-20 book metrics at scheduled sample times. It does not store full order book snapshots.
+`book_samples` stores derived top-20 book metrics at scheduled sample times.
 
-`market_features` stores one futures feature row per market.
+`market_features` stores one 5 minute futures summary per market.
 
-## Why REST First Instead Of WebSockets
+`market_feature_buckets` stores per-timestamp interval summaries such as:
 
-The original add-on notes described Binance websocket streams. Those are still valid for a later lower-latency collector, but the implemented V1 uses REST endpoints because:
+```text
+At 16:05:00 UTC
+net_taker_quote = -581240
+taker_imbalance = -0.014
+book_imbalance_5bps = +0.182
+spread_bps = +0.02
+```
 
-- it fits the existing scheduled collector loop
-- it avoids adding a websocket dependency
-- it keeps the collector easy to deploy under the current Node systemd service
-- it still records the requested market-level features
+## Raw Plus Derived
+
+Do not replace raw tables with summaries. Keep both:
+
+- raw rows let you recompute features when logic changes
+- market summaries make broad analysis fast
+- timestamp buckets explain when and why price moved inside a market
+
+Each bucket covers trades from `bucket_start` up to, but not including, `bucket_end`. The book values are the snapshot at `bucket_start`, and the price fields describe the futures price move from `bucket_start` to `bucket_end`.
+
+## REST First
+
+The original add-on notes described Binance websocket streams. Those are still valid for a later lower-latency collector, but the implemented V1 uses REST endpoints because it fits the existing scheduled collector loop and avoids adding a websocket dependency.
 
 The REST endpoints used are:
 
@@ -62,72 +79,6 @@ Official Binance references:
 - https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Aggregate-Trade-Streams
 - https://developers.binance.com/docs/derivatives/usds-margined-futures/websocket-market-streams/Partial-Book-Depth-Streams
 
-## Taker Flow
-
-Binance aggregate trades include `m`, which means the buyer was the maker.
-
-The collector maps it as:
-
-```text
-m = false -> buyer was taker/aggressive -> taker_side = buy
-m = true  -> seller was taker/aggressive -> taker_side = sell
-```
-
-For each aggregate trade:
-
-```text
-quote_notional = price * quantity
-```
-
-Market features include:
-
-```text
-total_volume_quote
-taker_buy_quote
-taker_sell_quote
-net_taker_quote
-taker_imbalance
-agg_trade_count
-large_trade_count
-max_trade_quote
-```
-
-`LARGE_TRADE_QUOTE_THRESHOLD` controls the `large_trade_count` cutoff. The default is `1000000` quote notional.
-
-## Book Liquidity
-
-The collector fetches futures top-20 depth at each scheduled sample time and stores derived features:
-
-```text
-best_bid_price
-best_bid_qty
-best_ask_price
-best_ask_qty
-mid_price
-spread_bps
-bid_depth_5bps
-ask_depth_5bps
-book_imbalance_5bps
-bid_depth_10bps
-ask_depth_10bps
-book_imbalance_10bps
-bid_depth_25bps
-ask_depth_25bps
-book_imbalance_25bps
-```
-
-Depth is quote notional:
-
-```text
-price * quantity
-```
-
-Book imbalance is:
-
-```text
-(bid_depth - ask_depth) / (bid_depth + ask_depth)
-```
-
 ## No-Leakage Rule
 
 Labels use the close-boundary price sample:
@@ -137,14 +88,14 @@ scheduled_at >= market.start_time
 and scheduled_at <= market.end_time
 ```
 
-Features do not use the close boundary:
+Features and buckets do not use the close boundary as a feature timestamp:
 
 ```sql
 scheduled_at >= market.start_time
 and scheduled_at < market.end_time
 ```
 
-That is important because the close price at `market.end_time` is the label. Feature inputs should explain the market before that label, not include the label boundary itself.
+The final bucket can end at `market.end_time` so it can measure the last pre-close interval, but the bucket starts before the label boundary.
 
 ## Env Settings
 
@@ -156,8 +107,6 @@ MAX_AGG_TRADE_PAGES_PER_MARKET=30
 
 Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to keep only the original price sampling behavior.
 
-`MAX_AGG_TRADE_PAGES_PER_MARKET` protects the collector from unbounded pagination in extreme trade volume. Each page can hold up to 1000 aggregate trades.
-
 ## Setup And Verification
 
 After pulling these changes, run:
@@ -165,22 +114,21 @@ After pulling these changes, run:
 ```bash
 npm run db:setup
 npm run build
+npm run features:backfill-buckets -- 288
 npm run collector
 ```
-
-The dashboard shows a futures microstructure panel once `market_features` rows exist.
 
 Useful SQL checks:
 
 ```sql
 select count(*), max(trade_time) from agg_trades;
 select count(*), max(scheduled_at) from book_samples;
-select market_id, source, feature_quality, agg_trade_count, book_sample_count
+select market_id, feature_quality, agg_trade_count, book_sample_count
 from market_features
 order by updated_at desc
 limit 10;
+select bucket_start, net_taker_quote, taker_imbalance, book_imbalance_5bps, spread_bps
+from market_feature_buckets
+order by bucket_start desc
+limit 10;
 ```
-
-## Later Upgrade Path
-
-A websocket collector can replace the REST collectors later if sub-second raw streaming becomes necessary. Keep the same tables and feature calculations unless there is a specific reason to change the data model.

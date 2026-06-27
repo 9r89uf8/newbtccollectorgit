@@ -63,6 +63,7 @@ The collector records the original spot/futures last-price samples and, by defau
 - Binance Futures aggregate trades for taker buy/sell flow
 - Binance Futures top-20 book depth for liquidity and imbalance
 - One derived `market_features` row per closed market
+- Per-timestamp `market_feature_buckets` rows inside each market
 
 Relevant env settings:
 
@@ -73,6 +74,12 @@ MAX_AGG_TRADE_PAGES_PER_MARKET=30
 ```
 
 Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector.
+
+After the bucket schema exists, existing closed markets can be materialized with:
+
+```bash
+npm run features:backfill-buckets -- 288
+```
 
 ## Data model
 
@@ -86,6 +93,7 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `book_samples`
 - `market_labels`
 - `market_features`
+- `market_feature_buckets`
 - `collector_heartbeats`
 - `collection_errors`
 

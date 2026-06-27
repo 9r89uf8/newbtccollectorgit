@@ -6,6 +6,7 @@ import {
 } from "./config.mjs";
 import { collectFuturesAggregateTradesForMarket } from "./aggTrades.mjs";
 import { collectFuturesBookSample } from "./bookSamples.mjs";
+import { writeMarketFeatureBuckets } from "./marketFeatureBuckets.mjs";
 import { writeMarketFeatures } from "./marketFeatures.mjs";
 import { writeMarketLabels } from "./marketLabels.mjs";
 import { collectPriceSamples } from "./priceSamples.mjs";
@@ -50,6 +51,7 @@ async function collectScheduledData(market, scheduledAt, sampleType) {
 
 export async function closeMarket(market) {
   let featureResult = null;
+  let bucketResult = null;
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     await collectFuturesAggregateTradesForMarket(market);
@@ -59,6 +61,7 @@ export async function closeMarket(market) {
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     featureResult = await writeMarketFeatures(market);
+    bucketResult = await writeMarketFeatureBuckets(market);
   }
 
   const complete = labels.every((label) => label.quality === "complete");
@@ -66,9 +69,17 @@ export async function closeMarket(market) {
   const featureMessage = featureResult
     ? `; features ${featureResult.feature_quality}`
     : "";
+  const bucketMessage = bucketResult
+    ? `; buckets ${bucketResult.bucketCount}`
+    : "";
 
   await updateMarketStatus(market.id, status);
-  await heartbeat(COLLECTOR_NAME, "running", market.id, `closed ${market.id} as ${status}${featureMessage}`);
+  await heartbeat(
+    COLLECTOR_NAME,
+    "running",
+    market.id,
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}`
+  );
 }
 
 async function closeDueMarkets() {

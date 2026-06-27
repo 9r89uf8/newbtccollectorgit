@@ -149,6 +149,50 @@ create index if not exists market_features_source_updated_idx
 create index if not exists market_features_symbol_source_idx
   on market_features (symbol, source);
 
+create table if not exists market_feature_buckets (
+  market_id text not null references markets(id) on delete cascade,
+  source text not null,
+  symbol text not null,
+  bucket_start timestamptz not null,
+  bucket_end timestamptz not null,
+  bucket_seconds numeric(14, 3) not null,
+  open_price numeric(20, 8),
+  close_price numeric(20, 8),
+  return_pct numeric(14, 8),
+  direction text check (direction in ('up', 'down', 'flat')),
+  total_volume_quote numeric(30, 8) not null default 0,
+  taker_buy_quote numeric(30, 8) not null default 0,
+  taker_sell_quote numeric(30, 8) not null default 0,
+  net_taker_quote numeric(30, 8) not null default 0,
+  taker_imbalance numeric(14, 8),
+  agg_trade_count integer not null default 0,
+  large_trade_count integer not null default 0,
+  large_trade_threshold numeric(20, 8) not null,
+  max_trade_quote numeric(30, 8),
+  best_bid_price numeric(20, 8),
+  best_ask_price numeric(20, 8),
+  mid_price numeric(20, 8),
+  spread_bps numeric(14, 8),
+  bid_depth_5bps numeric(30, 8),
+  ask_depth_5bps numeric(30, 8),
+  book_imbalance_5bps numeric(14, 8),
+  bid_depth_10bps numeric(30, 8),
+  ask_depth_10bps numeric(30, 8),
+  book_imbalance_10bps numeric(14, 8),
+  bid_depth_25bps numeric(30, 8),
+  ask_depth_25bps numeric(30, 8),
+  book_imbalance_25bps numeric(14, 8),
+  bucket_quality text not null check (bucket_quality in ('complete', 'partial', 'missing')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (market_id, source, bucket_start)
+);
+
+create index if not exists market_feature_buckets_source_time_idx
+  on market_feature_buckets (source, bucket_start desc);
+
+create index if not exists market_feature_buckets_symbol_source_time_idx
+  on market_feature_buckets (symbol, source, bucket_start desc);
 create table if not exists collector_heartbeats (
   collector_name text primary key,
   last_seen_at timestamptz not null,

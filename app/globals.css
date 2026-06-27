@@ -560,3 +560,20 @@ td strong {
     grid-template-columns: 1fr;
   }
 }
+
+.bucket-panel .muted {
+  margin: 16px 0 0;
+}
+
+.bucket-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.bucket-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
+  padding: 12px;
+}

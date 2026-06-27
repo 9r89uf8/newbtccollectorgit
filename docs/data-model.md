@@ -240,6 +240,46 @@ avg_ask_bid_depth_ratio
 | `partial` | Some feature inputs exist, but the row is not complete. |
 | `missing` | No trade or book inputs were found. |
 
+
+## Timestamp Feature Buckets
+
+The collector also materializes per-timestamp interval summaries in `market_feature_buckets`.
+
+Each bucket starts at a pre-close book sample timestamp and ends at the next book sample timestamp, or at `market.end_time` for the final pre-close bucket:
+
+```sql
+trade_time >= bucket_start
+and trade_time < bucket_end
+```
+
+For a complete 5 minute market this creates 76 bucket rows:
+
+```text
+56 five-second buckets
+20 one-second final-ramp buckets
+```
+
+Each bucket stores:
+
+```text
+bucket_start
+bucket_end
+bucket_seconds
+open_price
+close_price
+return_pct
+direction
+net_taker_quote
+taker_imbalance
+agg_trade_count
+spread_bps
+book_imbalance_5bps
+bid_depth_5bps
+ask_depth_5bps
+```
+
+The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_samples`. Keep the raw tables because bucket logic can be recomputed later if the analysis window or feature definitions change.
+
 ## Main Tables
 
 | Table | Purpose |
@@ -250,6 +290,7 @@ avg_ask_bid_depth_ratio
 | `book_samples` | Stores derived Binance Futures top-20 book metrics. |
 | `market_labels` | Stores open/close labels per market and source. |
 | `market_features` | Stores futures trade-flow and book-liquidity features per market. |
+| `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
 | `collector_heartbeats` | Stores latest collector status. |
 | `collection_errors` | Stores request and collection failures. |
 

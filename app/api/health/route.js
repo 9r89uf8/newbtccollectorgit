@@ -10,5 +10,6 @@ export async function GET() {
     heartbeat: data.heartbeat,
     stats: data.stats,
     featureStats: data.featureStats,
+    recentFeatureBuckets: data.recentFeatureBuckets,
   });
 }

@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "collector": "node collector/collector.mjs",
-    "db:setup": "node scripts/setupDb.mjs"
+    "db:setup": "node scripts/setupDb.mjs",
+    "features:backfill-buckets": "node scripts/backfillFeatureBuckets.mjs"
   },
   "dependencies": {
     "next": "16.2.9",

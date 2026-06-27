@@ -303,6 +303,57 @@ function FeaturePanel({ featureStats, recentFeatures }) {
   );
 }
 
+function FeatureBucketPanel({ buckets }) {
+  return (
+    <section className="panel stats-panel bucket-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="panel-label">Timestamp buckets</p>
+          <h2>Recent interval summaries</h2>
+        </div>
+      </div>
+      {buckets.length === 0 ? (
+        <p className="muted">No bucket rows yet.</p>
+      ) : (
+        <div className="bucket-list">
+          {buckets.slice(0, 5).map((bucket) => (
+            <article className="bucket-item" key={`${bucket.market_id}-${bucket.source}-${bucket.bucket_start}`}>
+              <div className="feature-item-top">
+                <div>
+                  <strong>{formatUtc(bucket.bucket_start)}</strong>
+                  <span>{Number(bucket.bucket_seconds).toFixed(0)}s window</span>
+                </div>
+                <span className={`status-pill ${statusClass(bucket.bucket_quality)}`}>{bucket.bucket_quality}</span>
+              </div>
+              <div className="feature-values">
+                <div>
+                  <span>Net taker</span>
+                  <strong className={signedClass(bucket.net_taker_quote)}>{formatCompactUsd(bucket.net_taker_quote)}</strong>
+                </div>
+                <div>
+                  <span>Taker imb.</span>
+                  <strong className={signedClass(bucket.taker_imbalance)}>{formatDecimal(bucket.taker_imbalance)}</strong>
+                </div>
+                <div>
+                  <span>Book imb.</span>
+                  <strong className={signedClass(bucket.book_imbalance_5bps)}>{formatDecimal(bucket.book_imbalance_5bps)}</strong>
+                </div>
+                <div>
+                  <span>Spread</span>
+                  <strong>{formatDecimal(bucket.spread_bps, 2)}</strong>
+                </div>
+              </div>
+              <p className="feature-footnote">
+                {bucket.agg_trade_count || 0} trades, {formatPct(bucket.return_pct)} {bucket.direction || "move"}
+              </p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ErrorList({ errors }) {
   return (
     <section className="panel error-panel">
@@ -391,6 +442,7 @@ export default async function Home() {
         <MarketRows markets={data.recentMarkets} />
         <div className="side-stack">
           <FeaturePanel featureStats={data.featureStats} recentFeatures={data.recentFeatures} />
+          <FeatureBucketPanel buckets={data.recentFeatureBuckets} />
           <DirectionStats directionStats={data.directionStats} />
           <ErrorList errors={data.recentErrors} />
         </div>

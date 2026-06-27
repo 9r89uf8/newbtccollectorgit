@@ -355,6 +355,74 @@ function FeatureBucketPanel({ buckets }) {
   );
 }
 
+function WebSocketPanel({ stats, summaries, forwardLabels }) {
+  const completeLabels = forwardLabels.reduce((total, row) => {
+    return row.quality === "complete" ? total + Number(row.count || 0) : total;
+  }, 0);
+
+  return (
+    <section className="panel stats-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="panel-label">WebSocket summaries</p>
+          <h2>1 second futures rows</h2>
+        </div>
+      </div>
+      <div className="feature-summary-grid">
+        <div>
+          <span>1h rows</span>
+          <strong>{stats?.bucket_count ?? 0}</strong>
+        </div>
+        <div>
+          <span>Book updates</span>
+          <strong>{stats?.book_ticker_updates ?? 0}</strong>
+        </div>
+        <div>
+          <span>Liq events</span>
+          <strong>{stats?.liquidation_count ?? 0}</strong>
+        </div>
+      </div>
+      {summaries.length === 0 ? (
+        <p className="muted">No WebSocket summaries yet.</p>
+      ) : (
+        <div className="feature-list">
+          {summaries.slice(0, 3).map((summary) => (
+            <article className="feature-item" key={`${summary.bucket_start}-${summary.summary_quality}`}>
+              <div className="feature-item-top">
+                <div>
+                  <strong>{formatUtc(summary.bucket_start)}</strong>
+                  <span>{summary.book_ticker_update_count || 0} book updates</span>
+                </div>
+                <span className={`status-pill ${statusClass(summary.summary_quality)}`}>{summary.summary_quality}</span>
+              </div>
+              <div className="feature-values">
+                <div>
+                  <span>Mid</span>
+                  <strong>{formatPrice(summary.mid_price_close)}</strong>
+                </div>
+                <div>
+                  <span>1s move bps</span>
+                  <strong className={signedClass(summary.mid_return_bps)}>{formatDecimal(summary.mid_return_bps, 2)}</strong>
+                </div>
+                <div>
+                  <span>Spread bps</span>
+                  <strong>{formatDecimal(summary.spread_bps_avg, 2)}</strong>
+                </div>
+                <div>
+                  <span>Net liq</span>
+                  <strong className={signedClass(summary.liquidation_net_quote)}>{formatCompactUsd(summary.liquidation_net_quote)}</strong>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      <p className="feature-footnote">
+        {completeLabels} complete forward labels over the last 24h.
+      </p>
+    </section>
+  );
+}
 function ErrorList({ errors }) {
   return (
     <section className="panel error-panel">
@@ -444,6 +512,11 @@ export default async function Home() {
         <div className="side-stack">
           <FeaturePanel featureStats={data.featureStats} recentFeatures={data.recentFeatures} />
           <FeatureBucketPanel buckets={data.recentFeatureBuckets} />
+          <WebSocketPanel
+            stats={data.websocketStats}
+            summaries={data.recentWebSocketSummaries}
+            forwardLabels={data.forwardLabelStats}
+          />
           <DirectionStats directionStats={data.directionStats} />
           <ErrorList errors={data.recentErrors} />
         </div>

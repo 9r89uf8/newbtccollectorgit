@@ -5,6 +5,9 @@ const BINANCE_SPOT_BASE_URL = (process.env.BINANCE_SPOT_BASE_URL || "https://api
 const BINANCE_FUTURES_BASE_URL = (
   process.env.BINANCE_FUTURES_BASE_URL || "https://fapi.binance.com"
 ).replace(/\/+$/, "");
+const BINANCE_FUTURES_WS_BASE_URL = (
+  process.env.BINANCE_FUTURES_WS_BASE_URL || "wss://fstream.binance.com/stream"
+).replace(/\/+$/, "");
 
 function readPositiveNumber(name, fallback) {
   const value = Number(process.env[name] || fallback);
@@ -27,6 +30,10 @@ function buildUrl(baseUrl, path, params) {
   return `${baseUrl}${path}?${search.toString()}`;
 }
 
+function buildFuturesWebSocketUrl(streams) {
+  return `${BINANCE_FUTURES_WS_BASE_URL}?streams=${streams.join("/")}`;
+}
+
 export const MARKET_MS = 5 * 60 * 1000;
 export const NORMAL_INTERVAL_MS = 5 * 1000;
 export const FINAL_RAMP_START_MS = 280 * 1000;
@@ -43,6 +50,7 @@ export const ENABLE_FUTURES_MICROSTRUCTURE = readBoolean(
   true
 );
 export const ENABLE_FUTURES_POSITIONING = readBoolean("ENABLE_FUTURES_POSITIONING", true);
+export const ENABLE_FUTURES_WEBSOCKET_SUMMARIES = readBoolean("ENABLE_FUTURES_WEBSOCKET_SUMMARIES", true);
 export const POSITION_SAMPLE_INTERVAL_MS = 5 * 1000;
 export const EXPECTED_POSITION_SAMPLES_PER_MARKET =
   MARKET_MS / POSITION_SAMPLE_INTERVAL_MS;
@@ -55,6 +63,14 @@ export const MAX_AGG_TRADE_PAGES_PER_MARKET = readPositiveNumber(
   "MAX_AGG_TRADE_PAGES_PER_MARKET",
   30
 );
+export const FUTURES_WS_SUMMARY_BUCKET_MS = 1000;
+export const FUTURES_WS_FLUSH_INTERVAL_MS = readPositiveNumber("FUTURES_WS_FLUSH_INTERVAL_MS", 1000);
+export const FUTURES_WS_FLUSH_LAG_MS = readPositiveNumber("FUTURES_WS_FLUSH_LAG_MS", 1500);
+export const FUTURES_WS_RECONNECT_INITIAL_MS = readPositiveNumber("FUTURES_WS_RECONNECT_INITIAL_MS", 1000);
+export const FUTURES_WS_RECONNECT_MAX_MS = readPositiveNumber("FUTURES_WS_RECONNECT_MAX_MS", 30000);
+export const FUTURES_WS_STALE_MS = readPositiveNumber("FUTURES_WS_STALE_MS", 60000);
+export const FORWARD_LABEL_HORIZONS_SECONDS = [1, 5, 10, 15, 30, 60];
+export const FORWARD_LABEL_MIN_THRESHOLD_BPS = readPositiveNumber("FORWARD_LABEL_MIN_THRESHOLD_BPS", 1);
 
 export const PRICE_SOURCES = [
   {
@@ -104,4 +120,14 @@ export const FUTURES_MICROSTRUCTURE_SOURCE = {
       fromId,
       limit,
     }),
+};
+
+export const FUTURES_WEBSOCKET_SOURCE = {
+  source: "binance_futures_ws",
+  instrumentType: "futures",
+  streams: () => {
+    const streamSymbol = SYMBOL.toLowerCase();
+    return [`${streamSymbol}@bookTicker`, `${streamSymbol}@forceOrder`];
+  },
+  url: () => buildFuturesWebSocketUrl(FUTURES_WEBSOCKET_SOURCE.streams()),
 };

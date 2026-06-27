@@ -130,6 +130,95 @@ create index if not exists derivative_position_samples_symbol_source_time_idx
 create index if not exists derivative_position_samples_time_idx
   on derivative_position_samples (scheduled_at desc);
 
+create table if not exists futures_ws_1s_summaries (
+  source text not null,
+  instrument_type text not null,
+  symbol text not null,
+  bucket_start timestamptz not null,
+  bucket_end timestamptz not null,
+  first_event_time timestamptz,
+  last_event_time timestamptz,
+  event_count integer not null default 0,
+  book_ticker_update_count integer not null default 0,
+  bid_price_move_count integer not null default 0,
+  ask_price_move_count integer not null default 0,
+  mid_price_move_count integer not null default 0,
+  best_bid_price_open numeric(20, 8),
+  best_bid_price_close numeric(20, 8),
+  best_bid_price_min numeric(20, 8),
+  best_bid_price_max numeric(20, 8),
+  best_bid_qty_open numeric(30, 12),
+  best_bid_qty_close numeric(30, 12),
+  best_bid_qty_min numeric(30, 12),
+  best_bid_qty_max numeric(30, 12),
+  best_ask_price_open numeric(20, 8),
+  best_ask_price_close numeric(20, 8),
+  best_ask_price_min numeric(20, 8),
+  best_ask_price_max numeric(20, 8),
+  best_ask_qty_open numeric(30, 12),
+  best_ask_qty_close numeric(30, 12),
+  best_ask_qty_min numeric(30, 12),
+  best_ask_qty_max numeric(30, 12),
+  mid_price_open numeric(20, 8),
+  mid_price_close numeric(20, 8),
+  mid_price_low numeric(20, 8),
+  mid_price_high numeric(20, 8),
+  mid_return_bps numeric(14, 8),
+  spread_bps_open numeric(14, 8),
+  spread_bps_close numeric(14, 8),
+  spread_bps_avg numeric(14, 8),
+  spread_bps_max numeric(14, 8),
+  microprice_open numeric(20, 8),
+  microprice_close numeric(20, 8),
+  microprice_bps_from_mid_close numeric(14, 8),
+  liquidation_count integer not null default 0,
+  liquidation_buy_quote numeric(30, 8) not null default 0,
+  liquidation_sell_quote numeric(30, 8) not null default 0,
+  liquidation_net_quote numeric(30, 8) not null default 0,
+  liquidation_max_quote numeric(30, 8),
+  avg_event_lag_ms numeric(14, 3),
+  max_event_lag_ms integer,
+  summary_quality text not null check (summary_quality in ('complete', 'partial', 'missing')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (source, symbol, bucket_start)
+);
+
+create index if not exists futures_ws_1s_summaries_symbol_source_time_idx
+  on futures_ws_1s_summaries (symbol, source, bucket_start desc);
+
+create table if not exists market_forward_labels (
+  market_id text not null references markets(id) on delete cascade,
+  source text not null,
+  symbol text not null,
+  bucket_start timestamptz not null,
+  horizon_seconds integer not null check (horizon_seconds > 0),
+  price_now numeric(20, 8),
+  future_price numeric(20, 8),
+  forward_return_bps numeric(14, 8),
+  future_max_up_bps numeric(14, 8),
+  future_max_down_bps numeric(14, 8),
+  threshold_bps numeric(14, 8) not null,
+  hit_up_threshold boolean not null default false,
+  hit_down_threshold boolean not null default false,
+  hit_up_before_down boolean,
+  direction_label text not null check (direction_label in ('up', 'down', 'flat', 'unknown')),
+  path_sample_count integer not null default 0,
+  quality text not null check (quality in ('complete', 'partial', 'missing')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (source, symbol, bucket_start, horizon_seconds)
+);
+
+create index if not exists market_forward_labels_market_idx
+  on market_forward_labels (market_id, horizon_seconds, bucket_start);
+
+create index if not exists market_forward_labels_symbol_source_time_idx
+  on market_forward_labels (symbol, source, bucket_start desc);
+
+create index if not exists market_forward_labels_direction_idx
+  on market_forward_labels (horizon_seconds, direction_label, bucket_start desc);
+
 create table if not exists market_labels (
   market_id text not null references markets(id) on delete cascade,
   source text not null,

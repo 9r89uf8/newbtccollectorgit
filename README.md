@@ -69,22 +69,26 @@ The collector records the original spot/futures last-price samples and, by defau
 - Binance Futures aggregate trades for taker buy/sell flow
 - Binance Futures top-20 book depth for liquidity and imbalance
 - Binance Futures mark/index/funding/open-interest positioning samples on a 5 second cadence
+- Binance Futures WebSocket book-ticker and liquidation 1-second summaries
 - One derived `market_features` row per closed market
 - One derived `market_position_features` row per closed market
 - One derived `market_behavior_labels` row per closed market
 - One derived `market_classifications` row per closed market
 - Per-timestamp `market_feature_buckets` rows inside each market
+- Forward outcome labels for 1s, 5s, 10s, 15s, 30s, and 60s horizons
 
 Relevant env settings:
 
 ```bash
 ENABLE_FUTURES_MICROSTRUCTURE=true
 ENABLE_FUTURES_POSITIONING=true
+ENABLE_FUTURES_WEBSOCKET_SUMMARIES=true
+FORWARD_LABEL_MIN_THRESHOLD_BPS=1
 LARGE_TRADE_QUOTE_THRESHOLD=1000000
 MAX_AGG_TRADE_PAGES_PER_MARKET=30
 ```
 
-Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest samples.
+Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed.
 
 After the bucket schema exists, existing closed markets can be materialized with:
 
@@ -105,14 +109,16 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `market_labels`
 - `market_features`
 - `derivative_position_samples`
+- `futures_ws_1s_summaries`
 - `market_position_features`
 - `market_behavior_labels`
 - `market_classifications`
 - `market_feature_buckets`
+- `market_forward_labels`
 - `collector_heartbeats`
 - `collection_errors`
 
-`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, and `derivative_position_samples` into hypertables.
+`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `futures_ws_1s_summaries`, and `market_forward_labels` into hypertables.
 
 ## Health endpoint
 

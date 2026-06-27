@@ -3,6 +3,7 @@ import {
   COLLECTOR_NAME,
   ENABLE_FUTURES_MICROSTRUCTURE,
   ENABLE_FUTURES_POSITIONING,
+  ENABLE_FUTURES_WEBSOCKET_SUMMARIES,
   SYMBOL,
 } from "./config.mjs";
 import { collectFuturesAggregateTradesForMarket } from "./aggTrades.mjs";
@@ -11,6 +12,11 @@ import {
   collectFuturesPositionSample,
   shouldCollectFuturesPositionSample,
 } from "./derivativePositionSamples.mjs";
+import {
+  refreshRecentForwardLabels,
+  writeMarketForwardLabels,
+} from "./forwardLabels.mjs";
+import { startFuturesWebSocketSummaryCollector } from "./futuresWebSocketSummaries.mjs";
 import { writeMarketBehaviorLabel } from "./marketBehaviorLabels.mjs";
 import { writeMarketClassification } from "./marketClassifications.mjs";
 import { writeMarketFeatureBuckets } from "./marketFeatureBuckets.mjs";
@@ -33,6 +39,7 @@ import {
 } from "./store.mjs";
 
 let stopping = false;
+let futuresWebSocketCollector = null;
 
 async function collectScheduledData(market, scheduledAt, sampleType) {
   const tasks = [collectPriceSamples(market, scheduledAt, sampleType)];
@@ -70,6 +77,8 @@ export async function closeMarket(market) {
   let positionResult = null;
   let behaviorResult = null;
   let classificationResult = null;
+  let forwardResult = null;
+  let forwardRefreshResult = null;
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     await collectFuturesAggregateTradesForMarket(market);
@@ -85,6 +94,10 @@ export async function closeMarket(market) {
       positionResult = await writeMarketPositionFeatures(market);
     }
     classificationResult = await writeMarketClassification(market);
+
+    if (ENABLE_FUTURES_WEBSOCKET_SUMMARIES) {
+      forwardResult = await writeMarketForwardLabels(market);
+    }
   }
 
   const complete = labels.every((label) => label.quality === "complete");
@@ -98,13 +111,23 @@ export async function closeMarket(market) {
   const positionMessage = positionResult ? `; positioning ${positionResult.position_quality}` : "";
   const behaviorMessage = behaviorResult ? `; behavior ${behaviorResult.shape_class}` : "";
   const classificationMessage = classificationResult ? `; class ${classificationResult.primary_class}` : "";
+  const forwardMessage = forwardResult ? `; forward labels ${forwardResult.labelCount}` : "";
 
   await updateMarketStatus(market.id, status);
+
+  if (ENABLE_FUTURES_MICROSTRUCTURE && ENABLE_FUTURES_WEBSOCKET_SUMMARIES) {
+    forwardRefreshResult = await refreshRecentForwardLabels();
+  }
+
+  const forwardRefreshMessage = forwardRefreshResult?.labelCount
+    ? `; refreshed ${forwardRefreshResult.labelCount}`
+    : "";
+
   await heartbeat(
     COLLECTOR_NAME,
     "running",
     market.id,
-    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}`
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${forwardRefreshMessage}`
   );
 }
 
@@ -118,6 +141,15 @@ async function closeDueMarkets() {
 export async function runCollector() {
   console.log(`${COLLECTOR_NAME} starting for ${SYMBOL}`);
   await heartbeat(COLLECTOR_NAME, "running", null, "collector starting");
+
+  if (
+    ENABLE_FUTURES_MICROSTRUCTURE &&
+    ENABLE_FUTURES_WEBSOCKET_SUMMARIES &&
+    !futuresWebSocketCollector
+  ) {
+    futuresWebSocketCollector = startFuturesWebSocketSummaryCollector();
+  }
+
   await closeDueMarkets();
 
   while (!stopping) {
@@ -146,6 +178,10 @@ export async function shutdown(signal) {
   stopping = true;
   console.log(`received ${signal}, stopping collector`);
   try {
+    if (futuresWebSocketCollector) {
+      await futuresWebSocketCollector.stop();
+      futuresWebSocketCollector = null;
+    }
     await heartbeat(COLLECTOR_NAME, "stopped", null, `stopped by ${signal}`);
   } finally {
     await closePool();

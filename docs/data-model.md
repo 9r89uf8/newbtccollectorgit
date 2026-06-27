@@ -19,8 +19,10 @@ It records three data families.
 | Aggregate trades | `binance_futures` | `futures` | `/fapi/v1/aggTrades` | Raw aggregate trades for each completed market. |
 | Top-20 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=20` | Derived top-of-book and depth metrics at each scheduled sample time. |
 | Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, premium, funding, and current open interest on a 5 second cadence. |
+| Top-of-book updates | `binance_futures_ws` | `futures` | WebSocket `@bookTicker` | One-second top-of-book summaries. Raw messages are not stored. |
+| Liquidation events | `binance_futures_ws` | `futures` | WebSocket `@forceOrder` | One-second liquidation notional summaries. Raw events are not stored. |
 
-The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`.
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`.
 
 ## Sampling Schedule
 
@@ -42,7 +44,7 @@ Expected last-price samples per source per complete market:
 154 total samples across spot + futures
 ```
 
-Book depth is sampled on the same schedule. Market-level feature calculations intentionally use only samples where:
+Book depth is sampled on the same schedule. WebSocket summaries are independent of this REST schedule and are stored as UTC-aligned 1-second buckets while the collector is running. Market-level feature calculations intentionally use only samples where:
 
 ```sql
 scheduled_at >= market.start_time
@@ -247,6 +249,82 @@ open_interest_change_quote
 open_interest_change_pct
 ```
 
+## WebSocket Summary Samples
+
+When futures microstructure collection is enabled, the collector can also subscribe to Binance Futures WebSocket streams for:
+
+```text
+<symbol>@bookTicker
+<symbol>@forceOrder
+```
+
+The collector uses these messages only as transient input. It does not store raw WebSocket messages, raw liquidation events, or debug copies. It aggregates finalized UTC-aligned 1-second rows into `futures_ws_1s_summaries`.
+
+Book-ticker summary fields include:
+
+```text
+book_ticker_update_count
+bid_price_move_count
+ask_price_move_count
+mid_price_move_count
+best_bid_price_open / close / min / max
+best_bid_qty_open / close / min / max
+best_ask_price_open / close / min / max
+best_ask_qty_open / close / min / max
+mid_price_open / close / low / high
+mid_return_bps
+spread_bps_open / close / avg / max
+microprice_open / close
+microprice_bps_from_mid_close
+avg_event_lag_ms
+max_event_lag_ms
+```
+
+Liquidation stream messages are summarized into the same 1-second row:
+
+```text
+liquidation_count
+liquidation_buy_quote
+liquidation_sell_quote
+liquidation_net_quote
+liquidation_max_quote
+```
+
+The WebSocket summary table is the short-horizon prediction row source. It captures 1-second top-of-book movement and liquidation pressure without creating a raw market-data firehose.
+
+## Forward Labels
+
+Forward labels are derived from `futures_ws_1s_summaries`; they do not add a new feed. For each 1-second summary row, the collector writes outcome labels for these horizons:
+
+```text
+1s, 5s, 10s, 15s, 30s, 60s
+```
+
+Each `market_forward_labels` row stores:
+
+```text
+price_now
+future_price
+forward_return_bps
+future_max_up_bps
+future_max_down_bps
+threshold_bps
+hit_up_threshold
+hit_down_threshold
+hit_up_before_down
+direction_label
+path_sample_count
+quality
+```
+
+The default direction threshold is:
+
+```text
+max(1.0 bps, 2x current spread_bps)
+```
+
+That keeps tiny quoted-market noise from being labeled as meaningful up/down movement. Complete labels require the future price row and enough 1-second path samples for the horizon.
+
 ## Market Features
 
 After labels are written, the collector materializes one futures feature row per market in `market_features`.
@@ -389,10 +467,12 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 | `market_labels` | Stores open/close labels per market and source. |
 | `market_features` | Stores futures trade-flow and book-liquidity features per market. |
 | `derivative_position_samples` | Stores compact Binance Futures mark/index/funding/open-interest samples. |
+| `futures_ws_1s_summaries` | Stores Binance Futures WebSocket book-ticker and liquidation summaries by 1-second bucket. |
 | `market_position_features` | Stores per-market positioning rollups derived from positioning samples. |
 | `market_behavior_labels` | Stores richer per-market futures behavior labels derived from existing samples and trades. |
 | `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
+| `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `collector_heartbeats` | Stores latest collector status. |
 | `collection_errors` | Stores request and collection failures. |
 
@@ -405,3 +485,5 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 - Aggregate trades are kept as a plain PostgreSQL table because the uniqueness rule is `(source, symbol, agg_trade_id)`.
 - Futures microstructure collection is enabled by default and can be disabled with `ENABLE_FUTURES_MICROSTRUCTURE=false`.
 - Futures positioning collection is enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.
+- Futures WebSocket summary collection is enabled by default and can be disabled with `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false`.
+- WebSocket storage is summary-only. Raw WebSocket messages and raw liquidation events are intentionally not stored.

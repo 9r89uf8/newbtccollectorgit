@@ -9,6 +9,7 @@
     "start": "next start",
     "collector": "node collector/collector.mjs",
     "db:setup": "node scripts/setupDb.mjs",
+    "db:clear-data": "node scripts/clearData.mjs",
     "features:backfill-buckets": "node scripts/backfillFeatureBuckets.mjs"
   },
   "dependencies": {

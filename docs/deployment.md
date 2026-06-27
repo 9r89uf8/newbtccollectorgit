@@ -169,7 +169,21 @@ systemctl start newbtccollector-collector
 systemctl status newbtccollector-collector --no-pager
 ```
 
-## 3. Deploy Code Changes And Restart
+## 3. Clear Collected Data
+
+This clears all collector rows while preserving the schema, indexes, and database user. Stop the collector first so it does not immediately write new rows.
+
+```bash
+cd /opt/newbtccollector
+systemctl stop newbtccollector-collector
+npm run db:clear-data -- --dry-run
+npm run db:clear-data -- --confirm=DELETE_ALL_MARKET_DATA
+systemctl start newbtccollector-collector
+```
+
+If the script detects a recent non-stopped collector heartbeat, it refuses to clear data unless you also pass `--allow-running-collector`.
+
+## 4. Deploy Code Changes And Restart
 
 Make code changes locally, commit them, and push them to GitHub. Then run one SSH command from your laptop.
 
@@ -232,7 +246,7 @@ If only `.env` changed, no Git deploy is needed:
 nano /opt/newbtccollector/.env
 systemctl restart newbtccollector-collector
 ```
-## 4. Read Droplet DB From Localhost With SSH Tunnel
+## 5. Read Droplet DB From Localhost With SSH Tunnel
 
 The local Next dashboard can read the Droplet PostgreSQL database through an SSH tunnel. This is preferred over opening PostgreSQL port `5432` to the internet.
 

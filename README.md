@@ -2,7 +2,7 @@
 
 Private BTCUSDT 5 minute market collector and dashboard.
 
-This repo intentionally uses plain JavaScript. It does not use TypeScript, Docker, scheduled backup jobs, or SSH tunnels.
+This repo intentionally uses plain JavaScript. It does not use TypeScript, Docker, or scheduled backup jobs.
 
 ## What is included
 
@@ -73,3 +73,15 @@ The close sample for one window is also the open sample for the next window when
 ```
 
 Returns database configuration status, latest collector heartbeat, and 24 hour market counts.
+
+## Droplet operations
+
+See `docs/deployment.md` for:
+
+- setting up a brand new Droplet
+- running the collector with systemd
+- pulling code changes and restarting the collector with one-command SSH deploy
+- reading the Droplet database from localhost with an SSH tunnel
+
+
+

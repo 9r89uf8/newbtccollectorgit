@@ -61,6 +61,23 @@ function formatNumber(value) {
   return new Intl.NumberFormat("en-US").format(number);
 }
 
+function formatBps(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number >= 0 ? "+" : ""}${number.toFixed(digits)} bps`;
+}
+
+function formatConfidence(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${Math.round(number * 100)}%`;
+}
+
+function formatClassName(value) {
+  if (!value) return "-";
+  return String(value).replaceAll("_", " ");
+}
+
 function statusClass(status) {
   if (status === "running" || status === "closed" || status === "complete") return "status-good";
   if (status === "open" || status === "partial") return "status-warn";
@@ -148,6 +165,57 @@ function LabelTable({ labels }) {
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function ClassificationSummary({ classification, behaviorLabel, positionFeature }) {
+  const reasons = Array.isArray(classification?.reasons) ? classification.reasons : [];
+  const tags = Array.isArray(classification?.secondary_tags) ? classification.secondary_tags : [];
+
+  return (
+    <section className="panel stats-panel detail-wide-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="panel-label">Classification</p>
+          <h2>Market behavior class</h2>
+        </div>
+        {classification ? <span className="status-pill status-muted">{formatConfidence(classification.confidence)}</span> : null}
+      </div>
+      {!classification ? (
+        <p className="muted">No classification row yet.</p>
+      ) : (
+        <>
+          <div className="detail-feature-grid">
+            <div>
+              <span>Class</span>
+              <strong>{formatClassName(classification.primary_class)}</strong>
+            </div>
+            <div>
+              <span>Shape</span>
+              <strong>{formatClassName(behaviorLabel?.shape_class)}</strong>
+            </div>
+            <div>
+              <span>Range</span>
+              <strong>{formatBps(behaviorLabel?.range_bps)}</strong>
+            </div>
+            <div>
+              <span>OI change</span>
+              <strong className={signedClass(positionFeature?.open_interest_change_pct)}>{formatPct(positionFeature?.open_interest_change_pct)}</strong>
+            </div>
+            <div>
+              <span>Premium change</span>
+              <strong className={signedClass(positionFeature?.premium_bps_change)}>{formatBps(positionFeature?.premium_bps_change)}</strong>
+            </div>
+            <div>
+              <span>Positioning</span>
+              <strong>{positionFeature ? positionFeature.position_quality : "missing"}</strong>
+            </div>
+          </div>
+          {reasons.length > 0 ? <p className="feature-footnote">{reasons.join(" ")}</p> : null}
+          {tags.length > 0 ? <p className="feature-footnote">{tags.map(formatClassName).join(", ")}</p> : null}
+        </>
+      )}
     </section>
   );
 }
@@ -386,6 +454,9 @@ export default async function MarketDetailPage({ params }) {
   }
 
   const futuresLabel = data.labels.find((label) => label.source === "binance_futures");
+  const classification = data.classifications[0] || null;
+  const behaviorLabel = data.behaviorLabels[0] || null;
+  const positionFeature = data.positionFeatures[0] || null;
   const chartPriceSeries = data.priceSeries.map((sample) => ({
     time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
     price: Number(sample.price),
@@ -416,9 +487,15 @@ export default async function MarketDetailPage({ params }) {
       <section className="metrics-grid detail-metrics-grid">
         <DetailMetric label="Window end" value={formatUtc(data.market.end_time)} />
         <DetailMetric label="Futures return" value={formatPct(futuresLabel?.return_pct)} tone={futuresLabel?.direction === "up" ? "good" : futuresLabel?.direction === "down" ? "bad" : "default"} />
+        <DetailMetric label="Market class" value={formatClassName(classification?.primary_class)} />
         <DetailMetric label="Buckets" value={data.buckets.length} />
-        <DetailMetric label="Top trades shown" value={data.topTrades.length} />
       </section>
+
+      <ClassificationSummary
+        classification={classification}
+        behaviorLabel={behaviorLabel}
+        positionFeature={positionFeature}
+      />
 
       <div className="detail-grid">
         <LabelTable labels={data.labels} />

@@ -18,8 +18,9 @@ It records three data families.
 | Last price | `binance_futures` | `futures` | `/fapi/v2/ticker/price` | Latest traded price samples. |
 | Aggregate trades | `binance_futures` | `futures` | `/fapi/v1/aggTrades` | Raw aggregate trades for each completed market. |
 | Top-20 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=20` | Derived top-of-book and depth metrics at each scheduled sample time. |
+| Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, premium, funding, and current open interest on a 5 second cadence. |
 
-The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`.
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`.
 
 ## Sampling Schedule
 
@@ -199,6 +200,53 @@ Book imbalance is:
 (bid_depth - ask_depth) / (bid_depth + ask_depth)
 ```
 
+## Futures Positioning Samples
+
+The collector can also sample Binance Futures positioning context with REST calls, without adding a WebSocket dependency. These calls run only on the 5 second cadence inside each market, including 5 second aligned final-ramp timestamps. The 1 second final-ramp price/book samples do not all trigger positioning calls.
+
+Each row in `derivative_position_samples` stores:
+
+```text
+mark_price
+index_price
+premium_bps
+funding_rate
+interest_rate
+next_funding_time
+open_interest_base
+open_interest_quote
+mark_exchange_time
+open_interest_exchange_time
+mark_latency_ms
+open_interest_latency_ms
+```
+
+Market-level positioning features are materialized in `market_position_features` using samples where:
+
+```sql
+scheduled_at >= market.start_time
+and scheduled_at < market.end_time
+```
+
+A complete positioning feature row expects 60 pre-close samples per 5 minute market. Derived fields include:
+
+```text
+mark_price_start
+mark_price_end
+premium_bps_start
+premium_bps_end
+premium_bps_min
+premium_bps_max
+premium_bps_avg
+premium_bps_change
+funding_rate
+minutes_to_funding
+open_interest_quote_start
+open_interest_quote_end
+open_interest_change_quote
+open_interest_change_pct
+```
+
 ## Market Features
 
 After labels are written, the collector materializes one futures feature row per market in `market_features`.
@@ -240,6 +288,56 @@ avg_ask_bid_depth_ratio
 | `partial` | Some feature inputs exist, but the row is not complete. |
 | `missing` | No trade or book inputs were found. |
 
+
+## Behavior Labels And Classification
+
+After the futures labels and microstructure features are written, the collector derives one futures behavior label in `market_behavior_labels`. This table is derived from existing futures price samples and aggregate trades. It does not add another raw feed.
+
+Behavior label fields include:
+
+```text
+high_price
+low_price
+high_time
+low_time
+range_bps
+close_location
+max_up_bps_from_open
+max_down_bps_from_open
+realized_vol_bps
+trade_vwap
+vwap_deviation_bps
+largest_1s_return_bps
+largest_5s_return_bps
+price_reversal_count
+magnitude_class
+shape_class
+close_location_class
+volatility_class
+```
+
+The collector then writes one rule-based row to `market_classifications`. The first version can classify markets as:
+
+```text
+quiet_range
+range_up
+range_down
+trend_up
+trend_down
+spike_fade
+reversal_up
+reversal_down
+buy_pressure_absorbed
+sell_pressure_absorbed
+long_build
+short_build
+short_squeeze
+long_squeeze
+deleveraging
+unclassified
+```
+
+Classification rows include `primary_class`, `secondary_tags`, `confidence`, `feature_version`, and `reasons`. They are derived and can be recomputed if thresholds or labels change.
 
 ## Timestamp Feature Buckets
 
@@ -290,6 +388,10 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 | `book_samples` | Stores derived Binance Futures top-20 book metrics. |
 | `market_labels` | Stores open/close labels per market and source. |
 | `market_features` | Stores futures trade-flow and book-liquidity features per market. |
+| `derivative_position_samples` | Stores compact Binance Futures mark/index/funding/open-interest samples. |
+| `market_position_features` | Stores per-market positioning rollups derived from positioning samples. |
+| `market_behavior_labels` | Stores richer per-market futures behavior labels derived from existing samples and trades. |
+| `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
 | `collector_heartbeats` | Stores latest collector status. |
 | `collection_errors` | Stores request and collection failures. |
@@ -302,3 +404,4 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 - `price_samples` and `book_samples` can become Timescale hypertables when TimescaleDB is installed.
 - Aggregate trades are kept as a plain PostgreSQL table because the uniqueness rule is `(source, symbol, agg_trade_id)`.
 - Futures microstructure collection is enabled by default and can be disabled with `ENABLE_FUTURES_MICROSTRUCTURE=false`.
+- Futures positioning collection is enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.

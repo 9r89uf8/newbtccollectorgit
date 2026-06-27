@@ -9,6 +9,7 @@ const schemaPath = resolve(process.cwd(), "db", "schema.sql");
 const hypertables = [
   { table: "price_samples", timeColumn: "scheduled_at" },
   { table: "book_samples", timeColumn: "scheduled_at" },
+  { table: "derivative_position_samples", timeColumn: "scheduled_at" },
 ];
 
 async function enableTimescaleIfAvailable(client) {

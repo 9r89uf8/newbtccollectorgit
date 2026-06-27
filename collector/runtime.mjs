@@ -2,13 +2,21 @@ import { closePool } from "../lib/db.js";
 import {
   COLLECTOR_NAME,
   ENABLE_FUTURES_MICROSTRUCTURE,
+  ENABLE_FUTURES_POSITIONING,
   SYMBOL,
 } from "./config.mjs";
 import { collectFuturesAggregateTradesForMarket } from "./aggTrades.mjs";
 import { collectFuturesBookSample } from "./bookSamples.mjs";
+import {
+  collectFuturesPositionSample,
+  shouldCollectFuturesPositionSample,
+} from "./derivativePositionSamples.mjs";
+import { writeMarketBehaviorLabel } from "./marketBehaviorLabels.mjs";
+import { writeMarketClassification } from "./marketClassifications.mjs";
 import { writeMarketFeatureBuckets } from "./marketFeatureBuckets.mjs";
 import { writeMarketFeatures } from "./marketFeatures.mjs";
 import { writeMarketLabels } from "./marketLabels.mjs";
+import { writeMarketPositionFeatures } from "./marketPositionFeatures.mjs";
 import { collectPriceSamples } from "./priceSamples.mjs";
 import {
   getMarketWindow,
@@ -31,6 +39,13 @@ async function collectScheduledData(market, scheduledAt, sampleType) {
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     tasks.push(collectFuturesBookSample(market, scheduledAt, sampleType));
+
+    if (
+      ENABLE_FUTURES_POSITIONING &&
+      shouldCollectFuturesPositionSample(market, scheduledAt)
+    ) {
+      tasks.push(collectFuturesPositionSample(market, scheduledAt, sampleType));
+    }
   }
 
   const results = await Promise.all(tasks);
@@ -52,6 +67,9 @@ async function collectScheduledData(market, scheduledAt, sampleType) {
 export async function closeMarket(market) {
   let featureResult = null;
   let bucketResult = null;
+  let positionResult = null;
+  let behaviorResult = null;
+  let classificationResult = null;
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     await collectFuturesAggregateTradesForMarket(market);
@@ -62,6 +80,11 @@ export async function closeMarket(market) {
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     featureResult = await writeMarketFeatures(market);
     bucketResult = await writeMarketFeatureBuckets(market);
+    behaviorResult = await writeMarketBehaviorLabel(market);
+    if (ENABLE_FUTURES_POSITIONING) {
+      positionResult = await writeMarketPositionFeatures(market);
+    }
+    classificationResult = await writeMarketClassification(market);
   }
 
   const complete = labels.every((label) => label.quality === "complete");
@@ -72,13 +95,16 @@ export async function closeMarket(market) {
   const bucketMessage = bucketResult
     ? `; buckets ${bucketResult.bucketCount}`
     : "";
+  const positionMessage = positionResult ? `; positioning ${positionResult.position_quality}` : "";
+  const behaviorMessage = behaviorResult ? `; behavior ${behaviorResult.shape_class}` : "";
+  const classificationMessage = classificationResult ? `; class ${classificationResult.primary_class}` : "";
 
   await updateMarketStatus(market.id, status);
   await heartbeat(
     COLLECTOR_NAME,
     "running",
     market.id,
-    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}`
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}`
   );
 }
 

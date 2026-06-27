@@ -42,6 +42,10 @@ export const ENABLE_FUTURES_MICROSTRUCTURE = readBoolean(
   "ENABLE_FUTURES_MICROSTRUCTURE",
   true
 );
+export const ENABLE_FUTURES_POSITIONING = readBoolean("ENABLE_FUTURES_POSITIONING", true);
+export const POSITION_SAMPLE_INTERVAL_MS = 5 * 1000;
+export const EXPECTED_POSITION_SAMPLES_PER_MARKET =
+  MARKET_MS / POSITION_SAMPLE_INTERVAL_MS;
 export const LARGE_TRADE_QUOTE_THRESHOLD = readPositiveNumber(
   "LARGE_TRADE_QUOTE_THRESHOLD",
   1_000_000
@@ -83,6 +87,14 @@ export const FUTURES_MICROSTRUCTURE_SOURCE = {
     buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/depth", {
       symbol: SYMBOL,
       limit: 20,
+    }),
+  markPriceUrl: () =>
+    buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/premiumIndex", {
+      symbol: SYMBOL,
+    }),
+  openInterestUrl: () =>
+    buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/openInterest", {
+      symbol: SYMBOL,
     }),
   aggTradesUrl: ({ startTime, endTime, fromId, limit = AGG_TRADE_PAGE_LIMIT } = {}) =>
     buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/aggTrades", {

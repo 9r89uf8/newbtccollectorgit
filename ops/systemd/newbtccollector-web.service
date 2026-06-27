@@ -1,0 +1,16 @@
+[Unit]
+Description=newbtccollector Next.js dashboard
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/newbtccollector
+EnvironmentFile=/opt/newbtccollector/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+User=btc
+
+[Install]
+WantedBy=multi-user.target

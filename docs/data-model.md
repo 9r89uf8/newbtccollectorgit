@@ -116,9 +116,9 @@ The `markets.status` field can be:
 | --- | --- |
 | `open` | The current market window is still collecting. |
 | `closed` | The market finished and all source labels were complete. |
-| `incomplete` | The market finished, but at least one source label was partial or missing. |
+| `incomplete` | The market has a known collection gap, or it finished with at least one source label partial or missing. |
 
-When the collector starts, it checks for older `open` markets whose `end_time` has passed and attempts to close them.
+When the collector starts, it checks for older `open` or active `incomplete` markets whose `end_time` has passed and attempts to close them. If the collector starts or restarts after the current market window has already begun, it marks that current market `incomplete` immediately and records a `collector_restart_gap` error. The market can still keep collecting until `end_time`; `closed_at` is set only when final close processing runs.
 
 ## Market Labels
 
@@ -291,6 +291,8 @@ liquidation_max_quote
 ```
 
 The WebSocket summary table is the short-horizon prediction row source. It captures 1-second top-of-book movement and liquidation pressure without creating a raw market-data firehose.
+
+If no WebSocket message arrives for 20 seconds by default, the collector marks the current market `incomplete`, records a `websocket_no_messages` error, and closes any open WebSocket so the reconnect loop can create a fresh connection. This threshold is controlled by `FUTURES_WS_STALE_MS`.
 
 ## Forward Labels
 

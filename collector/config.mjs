@@ -68,7 +68,7 @@ export const FUTURES_WS_FLUSH_INTERVAL_MS = readPositiveNumber("FUTURES_WS_FLUSH
 export const FUTURES_WS_FLUSH_LAG_MS = readPositiveNumber("FUTURES_WS_FLUSH_LAG_MS", 1500);
 export const FUTURES_WS_RECONNECT_INITIAL_MS = readPositiveNumber("FUTURES_WS_RECONNECT_INITIAL_MS", 1000);
 export const FUTURES_WS_RECONNECT_MAX_MS = readPositiveNumber("FUTURES_WS_RECONNECT_MAX_MS", 30000);
-export const FUTURES_WS_STALE_MS = readPositiveNumber("FUTURES_WS_STALE_MS", 60000);
+export const FUTURES_WS_STALE_MS = readPositiveNumber("FUTURES_WS_STALE_MS", 20000);
 export const FORWARD_LABEL_HORIZONS_SECONDS = [1, 5, 10, 15, 30, 60];
 export const FORWARD_LABEL_MIN_THRESHOLD_BPS = readPositiveNumber("FORWARD_LABEL_MIN_THRESHOLD_BPS", 1);
 

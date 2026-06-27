@@ -1,5 +1,6 @@
 import { query } from "../lib/db.js";
 import {
+  COLLECTOR_NAME,
   FUTURES_WEBSOCKET_SOURCE,
   FUTURES_WS_FLUSH_INTERVAL_MS,
   FUTURES_WS_FLUSH_LAG_MS,
@@ -9,7 +10,8 @@ import {
   FUTURES_WS_SUMMARY_BUCKET_MS,
   SYMBOL,
 } from "./config.mjs";
-import { recordError } from "./store.mjs";
+import { getMarketWindow, toIsoSeconds } from "./time.mjs";
+import { heartbeat, markMarketIncomplete, recordError, upsertMarket } from "./store.mjs";
 
 const OPEN_STATE = 1;
 const CLOSING_STATE = 2;
@@ -367,6 +369,41 @@ async function recordWebSocketError(state, errorType, message) {
   }
 }
 
+async function markCurrentMarketIncompleteForNoMessages(state, nowMs = Date.now()) {
+  const market = getMarketWindow(new Date(nowMs));
+  if (state.lastNoMessageMarketId === market.id) return;
+  state.lastNoMessageMarketId = market.id;
+
+  const message = `Binance futures WebSocket received no messages for ${Math.round(
+    FUTURES_WS_STALE_MS / 1000
+  )} seconds as of ${toIsoSeconds(new Date(nowMs))}; marking market incomplete`;
+
+  try {
+    await upsertMarket(market);
+    await markMarketIncomplete(market.id);
+    await recordError({
+      marketId: market.id,
+      source: FUTURES_WEBSOCKET_SOURCE.source,
+      errorType: "websocket_no_messages",
+      message,
+    });
+    await heartbeat(COLLECTOR_NAME, "error", market.id, message);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function handleNoRecentMessages(state) {
+  const nowMs = Date.now();
+  if (nowMs - state.lastMessageAt < FUTURES_WS_STALE_MS) return;
+
+  await markCurrentMarketIncompleteForNoMessages(state, nowMs);
+
+  if (state.ws && state.ws.readyState === OPEN_STATE) {
+    state.ws.close(4000, "stale websocket");
+  }
+}
+
 async function flushDueBuckets(state, force = false) {
   const cutoffMs = force
     ? Number.POSITIVE_INFINITY
@@ -398,13 +435,6 @@ function scheduleReconnect(state) {
   state.reconnectTimer.unref?.();
 }
 
-function closeStaleSocket(state) {
-  if (!state.ws || state.ws.readyState !== OPEN_STATE) return;
-  if (Date.now() - state.lastMessageAt < FUTURES_WS_STALE_MS) return;
-
-  recordWebSocketError(state, "websocket_stale", "Binance futures WebSocket stopped receiving messages");
-  state.ws.close(4000, "stale websocket");
-}
 
 function connect(state) {
   if (state.stopped) return;
@@ -419,7 +449,6 @@ function connect(state) {
 
   ws.addEventListener("open", () => {
     state.reconnectDelayMs = FUTURES_WS_RECONNECT_INITIAL_MS;
-    state.lastMessageAt = Date.now();
   });
 
   ws.addEventListener("message", (event) => {
@@ -456,6 +485,7 @@ export function startFuturesWebSocketSummaryCollector() {
     reconnectDelayMs: FUTURES_WS_RECONNECT_INITIAL_MS,
     lastErrorRecordedAt: 0,
     lastMessageAt: Date.now(),
+    lastNoMessageMarketId: null,
     stopped: false,
     ws: null,
   };
@@ -466,7 +496,9 @@ export function startFuturesWebSocketSummaryCollector() {
     flushDueBuckets(state).catch((error) => {
       recordWebSocketError(state, "websocket_summary_flush_error", error.message || String(error));
     });
-    closeStaleSocket(state);
+    handleNoRecentMessages(state).catch((error) => {
+      recordWebSocketError(state, "websocket_no_message_watchdog_error", error.message || String(error));
+    });
   }, FUTURES_WS_FLUSH_INTERVAL_MS);
   state.flushTimer.unref?.();
 

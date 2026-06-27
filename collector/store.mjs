@@ -49,13 +49,44 @@ export async function updateMarketStatus(marketId, status) {
   );
 }
 
+export async function markMarketIncomplete(marketId) {
+  const result = await query(
+    `
+      update markets
+      set status = 'incomplete'
+      where id = $1
+        and status = 'open'
+        and closed_at is null
+      returning id
+    `,
+    [marketId]
+  );
+
+  return result.rowCount > 0;
+}
+
+export async function getMarketStatus(marketId) {
+  const result = await query(
+    `
+      select status
+      from markets
+      where id = $1
+      limit 1
+    `,
+    [marketId]
+  );
+
+  return result.rows[0]?.status || null;
+}
+
 export async function getDueOpenMarkets(limit = 10) {
   const result = await query(
     `
       select id, symbol, start_time, end_time
       from markets
-      where status = 'open'
+      where status in ('open', 'incomplete')
         and end_time <= now()
+        and closed_at is null
       order by end_time asc
       limit $1
     `,

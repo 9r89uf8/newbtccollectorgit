@@ -33,13 +33,36 @@ import {
 } from "./time.mjs";
 import {
   getDueOpenMarkets,
+  getMarketStatus,
   heartbeat,
+  markMarketIncomplete,
+  recordError,
   updateMarketStatus,
   upsertMarket,
 } from "./store.mjs";
 
 let stopping = false;
 let futuresWebSocketCollector = null;
+
+async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {
+  const nextScheduledMs = getNextScheduledMs(nowMs, market);
+  if (nextScheduledMs <= market.startMs) return;
+
+  const changed = await markMarketIncomplete(market.id);
+  if (!changed) return;
+
+  const message = `collector started/restarted at ${toIsoSeconds(
+    new Date(nowMs)
+  )} after ${market.id} began; marking market incomplete`;
+
+  await recordError({
+    marketId: market.id,
+    source: COLLECTOR_NAME,
+    errorType: "collector_restart_gap",
+    message,
+  });
+  await heartbeat(COLLECTOR_NAME, "error", market.id, message);
+}
 
 async function collectScheduledData(market, scheduledAt, sampleType) {
   const tasks = [collectPriceSamples(market, scheduledAt, sampleType)];
@@ -100,8 +123,9 @@ export async function closeMarket(market) {
     }
   }
 
+  const wasMarkedIncomplete = (await getMarketStatus(market.id)) === "incomplete";
   const complete = labels.every((label) => label.quality === "complete");
-  const status = complete ? "closed" : "incomplete";
+  const status = complete && !wasMarkedIncomplete ? "closed" : "incomplete";
   const featureMessage = featureResult
     ? `; features ${featureResult.feature_quality}`
     : "";
@@ -122,12 +146,13 @@ export async function closeMarket(market) {
   const forwardRefreshMessage = forwardRefreshResult?.labelCount
     ? `; refreshed ${forwardRefreshResult.labelCount}`
     : "";
+  const incompleteMarkerMessage = wasMarkedIncomplete ? "; premarked incomplete" : "";
 
   await heartbeat(
     COLLECTOR_NAME,
     "running",
     market.id,
-    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${forwardRefreshMessage}`
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${forwardRefreshMessage}${incompleteMarkerMessage}`
   );
 }
 
@@ -151,6 +176,10 @@ export async function runCollector() {
   }
 
   await closeDueMarkets();
+
+  const startupMarket = getMarketWindow();
+  await upsertMarket(startupMarket);
+  await markStartupMarketIncompleteIfNeeded(startupMarket);
 
   while (!stopping) {
     const market = getMarketWindow();

@@ -28,10 +28,27 @@ function formatPrice(value) {
   }).format(number);
 }
 
+function formatCompactUsd(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(number);
+}
+
 function formatPct(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${number >= 0 ? "+" : ""}${number.toFixed(4)}%`;
+}
+
+function formatDecimal(value, digits = 3) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
 }
 
 function statusClass(status) {
@@ -44,6 +61,13 @@ function statusClass(status) {
 function directionClass(direction) {
   if (direction === "up") return "direction-up";
   if (direction === "down") return "direction-down";
+  return "direction-flat";
+}
+
+function signedClass(value) {
+  const number = Number(value);
+  if (number > 0) return "number-positive";
+  if (number < 0) return "number-negative";
   return "direction-flat";
 }
 
@@ -210,6 +234,75 @@ function MarketRows({ markets }) {
   );
 }
 
+function FeaturePanel({ featureStats, recentFeatures }) {
+  const stats = featureStats[0] || null;
+
+  return (
+    <section className="panel stats-panel feature-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="panel-label">Futures microstructure</p>
+          <h2>Taker flow and book depth</h2>
+        </div>
+      </div>
+      {!stats && recentFeatures.length === 0 ? (
+        <p className="muted">No feature rows yet.</p>
+      ) : (
+        <>
+          <div className="feature-summary-grid">
+            <div>
+              <span>24h rows</span>
+              <strong>{stats?.feature_rows ?? 0}</strong>
+            </div>
+            <div>
+              <span>Avg taker imb.</span>
+              <strong className={signedClass(stats?.avg_taker_imbalance)}>{formatDecimal(stats?.avg_taker_imbalance)}</strong>
+            </div>
+            <div>
+              <span>Avg book imb.</span>
+              <strong className={signedClass(stats?.avg_book_imbalance_5bps)}>{formatDecimal(stats?.avg_book_imbalance_5bps)}</strong>
+            </div>
+          </div>
+          <div className="feature-list">
+            {recentFeatures.slice(0, 3).map((feature) => (
+              <article className="feature-item" key={`${feature.market_id}-${feature.source}`}>
+                <div className="feature-item-top">
+                  <div>
+                    <strong>{formatUtc(feature.start_time)}</strong>
+                    <span>{feature.source}</span>
+                  </div>
+                  <span className={`status-pill ${statusClass(feature.feature_quality)}`}>{feature.feature_quality}</span>
+                </div>
+                <div className="feature-values">
+                  <div>
+                    <span>Net taker</span>
+                    <strong className={signedClass(feature.net_taker_quote)}>{formatCompactUsd(feature.net_taker_quote)}</strong>
+                  </div>
+                  <div>
+                    <span>Taker imb.</span>
+                    <strong className={signedClass(feature.taker_imbalance)}>{formatDecimal(feature.taker_imbalance)}</strong>
+                  </div>
+                  <div>
+                    <span>Book imb.</span>
+                    <strong className={signedClass(feature.avg_book_imbalance_5bps)}>{formatDecimal(feature.avg_book_imbalance_5bps)}</strong>
+                  </div>
+                  <div>
+                    <span>Spread</span>
+                    <strong>{formatDecimal(feature.avg_spread_bps, 2)}</strong>
+                  </div>
+                </div>
+                <p className="feature-footnote">
+                  {feature.agg_trade_count || 0} trades, {feature.book_sample_count || 0} book samples, {formatPct(feature.return_pct)} {feature.direction || "label"}
+                </p>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function ErrorList({ errors }) {
   return (
     <section className="panel error-panel">
@@ -297,6 +390,7 @@ export default async function Home() {
       <div className="content-grid">
         <MarketRows markets={data.recentMarkets} />
         <div className="side-stack">
+          <FeaturePanel featureStats={data.featureStats} recentFeatures={data.recentFeatures} />
           <DirectionStats directionStats={data.directionStats} />
           <ErrorList errors={data.recentErrors} />
         </div>
@@ -304,4 +398,3 @@ export default async function Home() {
     </main>
   );
 }
-

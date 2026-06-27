@@ -82,6 +82,9 @@ PGSSL=false
 COLLECTOR_NAME=btc-price-collector
 COLLECTOR_SYMBOL=BTCUSDT
 BINANCE_TIMEOUT_MS=4000
+ENABLE_FUTURES_MICROSTRUCTURE=true
+LARGE_TRADE_QUOTE_THRESHOLD=1000000
+MAX_AGG_TRADE_PAGES_PER_MARKET=30
 ```
 
 Save nano with `Ctrl+O`, `Enter`, then `Ctrl+X`.
@@ -328,8 +331,3 @@ systemctl status newbtccollector-collector --no-pager
 systemctl status postgresql --no-pager
 sudo -u postgres psql -d btc_collector -c "select source, count(*), max(scheduled_at) from price_samples group by source;"
 ```
-
-
-
-
-

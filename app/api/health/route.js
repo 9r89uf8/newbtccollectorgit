@@ -9,5 +9,6 @@ export async function GET() {
     error: data.error,
     heartbeat: data.heartbeat,
     stats: data.stats,
+    featureStats: data.featureStats,
   });
 }

@@ -1,0 +1,263 @@
+# Data Collection And Markets
+
+This document describes what the collector records and how 5 minute BTCUSDT markets are represented in PostgreSQL.
+
+## Raw Data Sources
+
+The collector tracks one symbol by default:
+
+```text
+BTCUSDT
+```
+
+It records three data families.
+
+| Family | Source | Instrument type | Endpoint | Stored data |
+| --- | --- | --- | --- | --- |
+| Last price | `binance_spot` | `spot` | `/api/v3/ticker/price` | Latest traded price samples. |
+| Last price | `binance_futures` | `futures` | `/fapi/v2/ticker/price` | Latest traded price samples. |
+| Aggregate trades | `binance_futures` | `futures` | `/fapi/v1/aggTrades` | Raw aggregate trades for each completed market. |
+| Top-20 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=20` | Derived top-of-book and depth metrics at each scheduled sample time. |
+
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`.
+
+## Sampling Schedule
+
+Every market is a 5 minute UTC window.
+
+| Window offset | Frequency | Sample type |
+| --- | --- | --- |
+| `0s` through `275s` | Every 5 seconds | `normal` |
+| `280s` through `299s` | Every 1 second | `final_ramp` |
+| `300s` | Once at the exact close boundary | `close` |
+
+Expected last-price samples per source per complete market:
+
+```text
+56 normal samples
+20 final_ramp samples
+1 close sample
+77 total samples per source
+154 total samples across spot + futures
+```
+
+Book depth is sampled on the same schedule. Market-level feature calculations intentionally use only samples where:
+
+```sql
+scheduled_at >= market.start_time
+and scheduled_at < market.end_time
+```
+
+That excludes the exact close boundary from explanatory features, because the close price at `end_time` is the label. The expected book sample count for a complete feature row is therefore:
+
+```text
+76 samples per market
+```
+
+## What A Market Is
+
+A market is a fixed UTC time window:
+
+```text
+[start_time, end_time]
+```
+
+The collector creates one market every 5 minutes for the configured symbol. Example:
+
+```text
+id:         2026-06-27T02:25:00Z_BTCUSDT
+symbol:     BTCUSDT
+start_time: 2026-06-27T02:25:00Z
+end_time:   2026-06-27T02:30:00Z
+status:     open
+```
+
+Market ids are deterministic:
+
+```text
+<UTC market start ISO timestamp>_<symbol>
+```
+
+## Boundary Samples
+
+Price samples are stored globally by timestamp, not physically inside a market.
+
+The close timestamp of one market is also the open timestamp of the next market:
+
+```text
+02:25:00 closes the 02:20-02:25 market
+02:25:00 opens the 02:25-02:30 market
+```
+
+This avoids duplicate data. A sample at the boundary can be used as both the previous market close and the next market open.
+
+Label queries include the exact close sample:
+
+```sql
+scheduled_at >= market.start_time
+and scheduled_at <= market.end_time
+```
+
+Feature queries exclude the exact close sample:
+
+```sql
+scheduled_at >= market.start_time
+and scheduled_at < market.end_time
+```
+
+## Market Status
+
+The `markets.status` field can be:
+
+| Status | Meaning |
+| --- | --- |
+| `open` | The current market window is still collecting. |
+| `closed` | The market finished and all source labels were complete. |
+| `incomplete` | The market finished, but at least one source label was partial or missing. |
+
+When the collector starts, it checks for older `open` markets whose `end_time` has passed and attempts to close them.
+
+## Market Labels
+
+After a market closes, the collector creates one label per price source in `market_labels`.
+
+| Label field | Meaning |
+| --- | --- |
+| `open_price` | First sample price in the market window for that source. |
+| `close_price` | Last sample price in the market window for that source. |
+| `return_pct` | `(close_price - open_price) / open_price * 100`. |
+| `direction` | `up`, `down`, or `flat`. |
+| `sample_count` | Number of price samples found in the market window for that source. |
+| `quality` | `complete`, `partial`, or `missing`. |
+
+A source label is `complete` when:
+
+```text
+sample_count >= 77
+first sample timestamp equals market start_time
+last sample timestamp equals market end_time
+```
+
+Otherwise it is `partial` if open and close samples exist, or `missing` if no usable samples exist.
+
+## Aggregate Trades
+
+The collector fetches Binance Futures aggregate trades after a market reaches its close boundary. Each trade row is stored in `agg_trades` with:
+
+| Field | Meaning |
+| --- | --- |
+| `agg_trade_id` | Binance aggregate trade id. |
+| `trade_time` | Exchange trade timestamp. |
+| `price` | Trade price. |
+| `quantity` | Base asset quantity. |
+| `quote_notional` | `price * quantity`. |
+| `buyer_is_maker` | Binance `m` field. |
+| `taker_side` | `buy` when `buyer_is_maker = false`, otherwise `sell`. |
+| `first_trade_id`, `last_trade_id` | Binance trade id range for the aggregate trade. |
+
+The taker-side rule is:
+
+```text
+buyer_is_maker = false -> buyer was taker/aggressive -> taker_side = buy
+buyer_is_maker = true  -> seller was taker/aggressive -> taker_side = sell
+```
+
+The collector pages through `/fapi/v1/aggTrades` and caps pages per market with `MAX_AGG_TRADE_PAGES_PER_MARKET`.
+
+## Book Samples
+
+At each scheduled sample time, the collector fetches Binance Futures top-20 depth and stores derived features in `book_samples`:
+
+```text
+best_bid_price
+best_bid_qty
+best_ask_price
+best_ask_qty
+mid_price
+spread_bps
+bid_depth_5bps
+ask_depth_5bps
+book_imbalance_5bps
+bid_depth_10bps
+ask_depth_10bps
+book_imbalance_10bps
+bid_depth_25bps
+ask_depth_25bps
+book_imbalance_25bps
+```
+
+Depth is stored as quote notional. For example:
+
+```text
+bid_depth_5bps = sum(price * quantity) for bids within 5 bps below mid
+ask_depth_5bps = sum(price * quantity) for asks within 5 bps above mid
+```
+
+Book imbalance is:
+
+```text
+(bid_depth - ask_depth) / (bid_depth + ask_depth)
+```
+
+## Market Features
+
+After labels are written, the collector materializes one futures feature row per market in `market_features`.
+
+Trade-flow fields include:
+
+```text
+total_volume_quote
+taker_buy_quote
+taker_sell_quote
+net_taker_quote
+taker_imbalance
+agg_trade_count
+large_trade_count
+max_trade_quote
+```
+
+Book-liquidity fields include:
+
+```text
+book_sample_count
+avg_spread_bps
+max_spread_bps
+avg_book_imbalance_5bps
+min_book_imbalance_5bps
+max_book_imbalance_5bps
+avg_bid_depth_5bps
+avg_ask_depth_5bps
+min_bid_depth_5bps
+min_ask_depth_5bps
+avg_ask_bid_depth_ratio
+```
+
+`feature_quality` is:
+
+| Quality | Meaning |
+| --- | --- |
+| `complete` | Trades exist and at least 76 pre-close book samples exist. |
+| `partial` | Some feature inputs exist, but the row is not complete. |
+| `missing` | No trade or book inputs were found. |
+
+## Main Tables
+
+| Table | Purpose |
+| --- | --- |
+| `markets` | Defines 5 minute BTCUSDT windows. |
+| `price_samples` | Stores spot and futures latest-price samples. |
+| `agg_trades` | Stores raw Binance Futures aggregate trades. |
+| `book_samples` | Stores derived Binance Futures top-20 book metrics. |
+| `market_labels` | Stores open/close labels per market and source. |
+| `market_features` | Stores futures trade-flow and book-liquidity features per market. |
+| `collector_heartbeats` | Stores latest collector status. |
+| `collection_errors` | Stores request and collection failures. |
+
+## Operational Assumptions
+
+- All market timestamps are UTC.
+- The configured symbol defaults to `BTCUSDT`.
+- Plain PostgreSQL is supported. TimescaleDB is optional.
+- `price_samples` and `book_samples` can become Timescale hypertables when TimescaleDB is installed.
+- Aggregate trades are kept as a plain PostgreSQL table because the uniqueness rule is `(source, symbol, agg_trade_id)`.
+- Futures microstructure collection is enabled by default and can be disabled with `ENABLE_FUTURES_MICROSTRUCTURE=false`.

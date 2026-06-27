@@ -6,17 +6,30 @@ loadLocalEnv();
 const { closePool, getPool, hasDatabaseConfig } = await import("../lib/db.js");
 
 const schemaPath = resolve(process.cwd(), "db", "schema.sql");
+const hypertables = [
+  { table: "price_samples", timeColumn: "scheduled_at" },
+  { table: "book_samples", timeColumn: "scheduled_at" },
+];
 
 async function enableTimescaleIfAvailable(client) {
   try {
     await client.query("create extension if not exists timescaledb");
-    await client.query(
-      "select create_hypertable('price_samples', 'scheduled_at', if_not_exists => true)"
-    );
-    console.log("TimescaleDB enabled for price_samples.");
   } catch (error) {
     console.log("TimescaleDB not enabled. Core PostgreSQL schema is ready.");
     console.log(`Reason: ${error.message}`);
+    return;
+  }
+
+  for (const hypertable of hypertables) {
+    try {
+      await client.query(
+        `select create_hypertable('${hypertable.table}', '${hypertable.timeColumn}', if_not_exists => true)`
+      );
+      console.log(`TimescaleDB enabled for ${hypertable.table}.`);
+    } catch (error) {
+      console.log(`TimescaleDB not enabled for ${hypertable.table}.`);
+      console.log(`Reason: ${error.message}`);
+    }
   }
 }
 
@@ -46,5 +59,3 @@ main().catch(async (error) => {
   await closePool();
   process.exit(1);
 });
-
-

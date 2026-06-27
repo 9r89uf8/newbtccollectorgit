@@ -631,6 +631,60 @@ td strong {
   margin-bottom: 16px;
 }
 
+.collapsible-panel-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.collapsible-panel-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-panel-summary:focus-visible {
+  outline: 2px solid #9bbcf2;
+  outline-offset: 4px;
+}
+
+.collapsible-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapsible-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.collapsible-toggle-hide {
+  display: none;
+}
+
+.collapsible-panel[open] .collapsible-toggle-show {
+  display: none;
+}
+
+.collapsible-panel[open] .collapsible-toggle-hide {
+  display: inline;
+}
+
+.collapsible-panel-body {
+  margin-top: 18px;
+}
+
+.collapsible-panel-body .detail-feature-grid {
+  margin-top: 0;
+}
+
 .detail-feature-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -798,13 +852,13 @@ td strong {
 
 .echarts-market-chart {
   width: max(1080px, 100%);
-  height: 740px;
+  height: 1150px;
 }
 
 @media (max-width: 760px) {
   .echarts-market-chart {
     width: 1080px;
-    height: 740px;
+    height: 1150px;
   }
 }
 

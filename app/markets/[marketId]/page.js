@@ -266,17 +266,167 @@ function FeatureSummary({ features }) {
   );
 }
 
+function sumNumeric(rows, field) {
+  return rows.reduce((total, row) => {
+    const number = Number(row[field]);
+    return Number.isFinite(number) ? total + number : total;
+  }, 0);
+}
+
+function averageNumeric(rows, field) {
+  let total = 0;
+  let count = 0;
+  for (const row of rows) {
+    const number = Number(row[field]);
+    if (Number.isFinite(number)) {
+      total += number;
+      count += 1;
+    }
+  }
+  return count > 0 ? total / count : null;
+}
+
+function WebSocketSummaryPanel({ summaries, forwardLabelStats }) {
+  const bookUpdates = sumNumeric(summaries, "book_ticker_update_count");
+  const liquidationCount = sumNumeric(summaries, "liquidation_count");
+  const netLiquidation = sumNumeric(summaries, "liquidation_net_quote");
+  const avgSpread = averageNumeric(summaries, "spread_bps_avg");
+
+  return (
+    <details className="panel table-panel detail-wide-panel collapsible-panel">
+      <summary className="panel-heading collapsible-panel-summary">
+        <div>
+          <p className="panel-label">WebSocket summaries</p>
+          <h2>1 second book and liquidation rows</h2>
+        </div>
+        <div className="collapsible-panel-actions">
+          <span className="status-pill status-muted">{summaries.length} rows</span>
+          <span className="collapsible-toggle" aria-hidden="true">
+            <span className="collapsible-toggle-show">Show</span>
+            <span className="collapsible-toggle-hide">Hide</span>
+          </span>
+        </div>
+      </summary>
+
+      <div className="collapsible-panel-body">
+        <div className="detail-feature-grid">
+          <div>
+            <span>Book updates</span>
+            <strong>{formatNumber(bookUpdates)}</strong>
+          </div>
+          <div>
+            <span>Liquidations</span>
+            <strong>{formatNumber(liquidationCount)}</strong>
+          </div>
+          <div>
+            <span>Net liq</span>
+            <strong className={signedClass(netLiquidation)}>{formatCompactUsd(netLiquidation)}</strong>
+          </div>
+          <div>
+            <span>Avg spread</span>
+            <strong>{formatBps(avgSpread)}</strong>
+          </div>
+        </div>
+
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Horizon</th>
+              <th>Quality</th>
+              <th>Direction</th>
+              <th>Labels</th>
+              <th>Avg return</th>
+              <th>Avg max up</th>
+              <th>Avg max down</th>
+            </tr>
+          </thead>
+          <tbody>
+            {forwardLabelStats.length === 0 ? (
+              <tr>
+                <td colSpan="7" className="empty-cell">No forward labels for this market.</td>
+              </tr>
+            ) : (
+              forwardLabelStats.map((row) => (
+                <tr key={`${row.horizon_seconds}-${row.quality}-${row.direction_label}`}>
+                  <td>{row.horizon_seconds}s</td>
+                  <td><span className={`status-pill ${statusClass(row.quality)}`}>{row.quality}</span></td>
+                  <td className={directionClass(row.direction_label)}>{row.direction_label}</td>
+                  <td>{formatNumber(row.count)}</td>
+                  <td className={signedClass(row.avg_forward_return_bps)}>{formatBps(row.avg_forward_return_bps)}</td>
+                  <td className={signedClass(row.avg_future_max_up_bps)}>{formatBps(row.avg_future_max_up_bps)}</td>
+                  <td className={signedClass(row.avg_future_max_down_bps)}>{formatBps(row.avg_future_max_down_bps)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="table-scroll">
+        <table className="bucket-detail-table">
+          <thead>
+            <tr>
+              <th>Second</th>
+              <th>Mid</th>
+              <th>1s move</th>
+              <th>Spread avg</th>
+              <th>Spread max</th>
+              <th>Book updates</th>
+              <th>Mid moves</th>
+              <th>Net liq</th>
+              <th>Max liq</th>
+              <th>Lag</th>
+              <th>Quality</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summaries.length === 0 ? (
+              <tr>
+                <td colSpan="11" className="empty-cell">No WebSocket summaries for this market.</td>
+              </tr>
+            ) : (
+              summaries.map((summary) => (
+                <tr key={summary.bucket_start}>
+                  <td>{formatUtc(summary.bucket_start)}</td>
+                  <td>{formatPrice(summary.mid_price_close)}</td>
+                  <td className={signedClass(summary.mid_return_bps)}>{formatBps(summary.mid_return_bps)}</td>
+                  <td>{formatBps(summary.spread_bps_avg)}</td>
+                  <td>{formatBps(summary.spread_bps_max)}</td>
+                  <td>{formatNumber(summary.book_ticker_update_count)}</td>
+                  <td>{formatNumber(summary.mid_price_move_count)}</td>
+                  <td className={signedClass(summary.liquidation_net_quote)}>{formatCompactUsd(summary.liquidation_net_quote)}</td>
+                  <td>{formatCompactUsd(summary.liquidation_max_quote)}</td>
+                  <td>{summary.avg_event_lag_ms ? `${Number(summary.avg_event_lag_ms).toFixed(0)} ms` : "-"}</td>
+                  <td><span className={`status-pill ${statusClass(summary.summary_quality)}`}>{summary.summary_quality}</span></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      </div>
+    </details>
+  );
+}
 function BucketTable({ buckets }) {
   return (
-    <section className="panel table-panel detail-wide-panel">
-      <div className="panel-heading">
+    <details className="panel table-panel detail-wide-panel collapsible-panel">
+      <summary className="panel-heading collapsible-panel-summary">
         <div>
           <p className="panel-label">Timestamp buckets</p>
           <h2>Interval-by-interval explanation</h2>
         </div>
-        <span className="status-pill status-muted">{buckets.length} rows</span>
-      </div>
-      <div className="table-scroll">
+        <div className="collapsible-panel-actions">
+          <span className="status-pill status-muted">{buckets.length} rows</span>
+          <span className="collapsible-toggle" aria-hidden="true">
+            <span className="collapsible-toggle-show">Show</span>
+            <span className="collapsible-toggle-hide">Hide</span>
+          </span>
+        </div>
+      </summary>
+      <div className="collapsible-panel-body">
+        <div className="table-scroll">
         <table className="bucket-detail-table">
           <thead>
             <tr>
@@ -317,8 +467,9 @@ function BucketTable({ buckets }) {
             )}
           </tbody>
         </table>
+        </div>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -474,6 +625,22 @@ export default async function MarketDetailPage({ params }) {
     premium_bps: Number(sample.premium_bps),
     funding_rate: Number(sample.funding_rate),
   }));
+  const toChartNumber = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  const chartWebSocketSummaries = data.webSocketSummaries.map((summary) => ({
+    bucket_start: summary.bucket_start instanceof Date ? summary.bucket_start.toISOString() : summary.bucket_start,
+    mid_price_close: toChartNumber(summary.mid_price_close),
+    spread_bps_avg: toChartNumber(summary.spread_bps_avg),
+    spread_bps_max: toChartNumber(summary.spread_bps_max),
+    liquidation_net_quote: toChartNumber(summary.liquidation_net_quote),
+    book_ticker_update_count: toChartNumber(summary.book_ticker_update_count),
+    mid_price_move_count: toChartNumber(summary.mid_price_move_count),
+    microprice_bps_from_mid_close: toChartNumber(summary.microprice_bps_from_mid_close),
+    avg_event_lag_ms: toChartNumber(summary.avg_event_lag_ms),
+  }));
 
   return (
     <main className="dashboard-shell market-detail-shell">
@@ -512,7 +679,7 @@ export default async function MarketDetailPage({ params }) {
         <div className="panel-heading">
           <div>
             <p className="panel-label">BTC futures price</p>
-            <h2>Price, taker flow, book imbalance, spread, and positioning</h2>
+            <h2>Price, taker flow, WebSocket liquidity, spread, and positioning</h2>
           </div>
           <span className="status-pill status-muted">{chartPriceSeries.length} samples</span>
         </div>
@@ -522,8 +689,14 @@ export default async function MarketDetailPage({ params }) {
           priceSeries={chartPriceSeries}
           buckets={chartBuckets}
           positionSeries={chartPositionSeries}
+          webSocketSummaries={chartWebSocketSummaries}
         />
       </section>
+
+      <WebSocketSummaryPanel
+        summaries={data.webSocketSummaries}
+        forwardLabelStats={data.forwardLabelStats}
+      />
 
       <BucketTable buckets={data.buckets} />
 

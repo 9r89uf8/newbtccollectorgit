@@ -10,9 +10,19 @@ const HELP_TOPICS = [
     text: "The Binance Futures BTCUSDT last price sampled during this 5 minute market.",
   },
   {
+    id: "wsMid",
+    label: "WS mid",
+    text: "One-second Binance Futures WebSocket mid price from the best bid and best ask. It fills the gaps between REST price samples.",
+  },
+  {
     id: "netTaker",
     label: "Net taker",
-    text: "Aggressive buy notional minus aggressive sell notional for each interval. Positive means taker buyers dominated; negative means taker sellers dominated. Bars use a signed log visual scale, but tooltips show raw dollars.",
+    text: "Aggressive buy dollars minus aggressive sell dollars. Positive means market buyers hit asks more than market sellers hit bids, which often supports upward pressure. Negative means sellers were more aggressive, which often pressures price down. Tooltips show raw dollars.",
+  },
+  {
+    id: "netLiquidation",
+    label: "Net liq",
+    text: "One-second liquidation notional from the WebSocket force-order stream. Positive means buy liquidation notional exceeded sell liquidation notional; negative means sell liquidations dominated.",
   },
   {
     id: "takerImbalance",
@@ -27,17 +37,22 @@ const HELP_TOPICS = [
   {
     id: "spread",
     label: "Spread",
-    text: "Best ask minus best bid, measured in basis points. Wider spread often means thinner or less stable liquidity.",
+    text: "Best ask minus best bid, measured in basis points. Wider spread often means thinner or less stable liquidity. The WS spread line is the one-second WebSocket average.",
+  },
+  {
+    id: "bookUpdates",
+    label: "Book updates",
+    text: "A top-of-book update is a WebSocket message that the best bid price, best bid quantity, best ask price, or best ask quantity changed. Example: before best bid = 60194.90 qty 3.2 BTC and best ask = 60195.00 qty 1.8 BTC; after best bid = 60194.90 qty 4.1 BTC and best ask = 60195.10 qty 0.9 BTC. That counts as a top-of-book update.",
   },
   {
     id: "openInterest",
     label: "Open interest",
-    text: "Current Binance Futures open interest converted to quote notional with the sampled mark price.",
+    text: "Total open BTC futures exposure, shown in dollars. Rising open interest means new leverage is entering; falling open interest means positions are closing. Rising OI with price usually supports trend continuation; falling OI during a sharp move often means squeeze or deleveraging.",
   },
   {
     id: "premium",
     label: "Premium",
-    text: "Mark price minus index price, measured in basis points. Positive values mean the perp mark is above the index.",
+    text: "Perp mark price minus index price in bps. Positive means futures trade above the index, often showing leveraged long demand. Negative means futures trade below index, often showing weaker demand or heavier short pressure. The dashed line is zero.",
   },
 ];
 
@@ -75,6 +90,18 @@ function formatBps(value) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(2)} bps`;
 }
 
+function formatCount(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return new Intl.NumberFormat("en-US").format(number);
+}
+
+function formatMilliseconds(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number.toFixed(0)} ms`;
+}
+
 function formatUtc(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -94,6 +121,7 @@ function toTimeValue(value) {
 }
 
 function finiteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -117,22 +145,43 @@ function buildTooltip(params) {
   const time = rows[0]?.value?.[0];
   const byName = new Map(rows.map((row) => [row.seriesName, row]));
 
-  function row(label, seriesName, formatter) {
+  function marker(item) {
+    return `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${item.color};margin-right:6px"></span>`;
+  }
+
+  function row(label, seriesName, formatter, valueIndex = 1) {
     const item = byName.get(seriesName);
     if (!item) return "";
-    return `<div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${item.color};margin-right:6px"></span>${label}: <b>${formatter(item.value?.[2] ?? item.value?.[1])}</b></div>`;
+    return `<div>${marker(item)}${label}: <b>${formatter(item.value?.[valueIndex])}</b></div>`;
+  }
+
+  function detail(label, seriesName, valueIndex, formatter) {
+    const item = byName.get(seriesName);
+    if (!item) return "";
+    const value = item.value?.[valueIndex];
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "";
+    return `<div style="padding-left:16px;color:#667085">${label}: <b>${formatter(value)}</b></div>`;
   }
 
   return `
-    <div style="min-width:240px">
+    <div style="min-width:260px">
       <div style="font-weight:700;margin-bottom:6px">${formatUtc(time)}</div>
       ${row("BTC price", "BTC price", formatPrice)}
-      ${row("Net taker", "Net taker", formatCompactUsd)}
+      ${row("WS mid", "WS mid", formatPrice)}
+      ${detail("Mid moves", "WS mid", 3, formatCount)}
+      ${detail("Microprice dev", "WS mid", 4, formatBps)}
+      ${detail("Event lag", "WS mid", 5, formatMilliseconds)}
+      ${row("Net taker", "Net taker", formatCompactUsd, 2)}
+      ${row("Net liquidation", "Net liquidation", formatCompactUsd, 2)}
       ${row("Taker imbalance", "Taker imbalance", (value) => formatDecimal(value, 3))}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
       ${row("Spread", "Spread", formatBps)}
+      ${row("WS spread", "WS spread", formatBps)}
+      ${detail("WS spread max", "WS spread", 2, formatBps)}
+      ${row("Book updates", "Book updates", formatCount)}
       ${row("Open interest", "Open interest", formatCompactUsd)}
       ${row("Premium", "Premium", formatBps)}
+      ${row("BTC on OI", "BTC on OI", formatPrice)}
     </div>
   `;
 }
@@ -143,6 +192,7 @@ export default function MarketMicrostructureChart({
   priceSeries,
   buckets,
   positionSeries = [],
+  webSocketSummaries = [],
 }) {
   const chartRef = useRef(null);
   const [activeHelpId, setActiveHelpId] = useState(null);
@@ -168,6 +218,19 @@ export default function MarketMicrostructureChart({
         premiumBps: finiteNumber(sample.premium_bps),
       }))
       .filter((sample) => sample.time !== null);
+    const webSocketRows = webSocketSummaries
+      .map((summary) => ({
+        time: toTimeValue(summary.bucket_start),
+        midPrice: finiteNumber(summary.mid_price_close),
+        spreadAvg: finiteNumber(summary.spread_bps_avg),
+        spreadMax: finiteNumber(summary.spread_bps_max),
+        netLiquidation: finiteNumber(summary.liquidation_net_quote),
+        bookTickerUpdateCount: finiteNumber(summary.book_ticker_update_count),
+        midPriceMoveCount: finiteNumber(summary.mid_price_move_count),
+        micropriceBpsFromMid: finiteNumber(summary.microprice_bps_from_mid_close),
+        avgEventLagMs: finiteNumber(summary.avg_event_lag_ms),
+      }))
+      .filter((summary) => summary.time !== null);
 
     const netTakerData = bucketRows
       .filter((bucket) => bucket.netTaker !== null)
@@ -187,14 +250,36 @@ export default function MarketMicrostructureChart({
     const premiumData = positionRows
       .filter((sample) => sample.premiumBps !== null)
       .map((sample) => [sample.time, sample.premiumBps]);
-
+    const wsMidData = webSocketRows
+      .filter((summary) => summary.midPrice !== null)
+      .map((summary) => [
+        summary.time,
+        summary.midPrice,
+        summary.bookTickerUpdateCount,
+        summary.midPriceMoveCount,
+        summary.micropriceBpsFromMid,
+        summary.avgEventLagMs,
+      ]);
+    const wsSpreadData = webSocketRows
+      .filter((summary) => summary.spreadAvg !== null)
+      .map((summary) => [summary.time, summary.spreadAvg, summary.spreadMax]);
+    const bookUpdateData = webSocketRows
+      .filter((summary) => summary.bookTickerUpdateCount !== null)
+      .map((summary) => [summary.time, summary.bookTickerUpdateCount]);
+    const netLiquidationData = webSocketRows
+      .filter((summary) => summary.netLiquidation !== null)
+      .map((summary) => [
+        summary.time,
+        signedLogNetTaker(summary.netLiquidation),
+        summary.netLiquidation,
+      ]);
     const start = toTimeValue(marketStart);
     const end = toTimeValue(marketEnd);
 
     return {
       animation: false,
       backgroundColor: "#fbfcfe",
-      color: ["#175cd3", "#067647", "#b42318", "#7a5af8", "#b54708", "#0e7490", "#c11574"],
+      color: ["#175cd3", "#344054", "#067647", "#c11574", "#7a5af8", "#16b364", "#b54708", "#f79009", "#667085", "#0e7490", "#c11574", "#475467"],
       legend: {
         top: 6,
         left: 10,
@@ -210,10 +295,10 @@ export default function MarketMicrostructureChart({
         formatter: buildTooltip,
       },
       dataZoom: [
-        { type: "inside", xAxisIndex: [0, 1, 2, 3], filterMode: "none" },
+        { type: "inside", xAxisIndex: [0, 1, 2, 3, 4], filterMode: "none" },
         {
           type: "slider",
-          xAxisIndex: [0, 1, 2, 3],
+          xAxisIndex: [0, 1, 2, 3, 4],
           filterMode: "none",
           bottom: 10,
           height: 22,
@@ -223,13 +308,15 @@ export default function MarketMicrostructureChart({
         },
       ],
       axisPointer: { link: [{ xAxisIndex: "all" }] },
+
       grid: [
-        { left: 78, right: 72, top: 50, height: 180 },
-        { left: 78, right: 72, top: 270, height: 100 },
-        { left: 78, right: 72, top: 410, height: 115 },
-        { left: 78, right: 72, top: 565, height: 110 },
+        { left: 78, right: 132, top: 58, height: 175 },
+        { left: 78, right: 132, top: 310, height: 115 },
+        { left: 78, right: 132, top: 505, height: 120 },
+        { left: 78, right: 132, top: 705, height: 120 },
+        { left: 78, right: 132, top: 905, height: 185 },
       ],
-      xAxis: [0, 1, 2, 3].map((gridIndex) => ({
+      xAxis: [0, 1, 2, 3, 4].map((gridIndex) => ({
         type: "time",
         gridIndex,
         min: start || undefined,
@@ -280,15 +367,53 @@ export default function MarketMicrostructureChart({
           type: "value",
           gridIndex: 3,
           scale: true,
-          axisLabel: { color: "#0e7490", formatter: formatCompactUsd },
+          name: "WS spread",
+          nameTextStyle: { color: "#f79009", fontSize: 11 },
+          axisLabel: { color: "#f79009", formatter: formatBps },
           splitLine: { lineStyle: { color: "#edf2f7" } },
         },
         {
           type: "value",
           gridIndex: 3,
           position: "right",
+          min: 0,
           scale: true,
+          name: "updates",
+          nameTextStyle: { color: "#667085", fontSize: 11 },
+          axisLabel: { color: "#667085", formatter: formatCount },
+          splitLine: { show: false },
+        },
+        {
+          type: "value",
+          gridIndex: 4,
+          scale: true,
+          name: "Open interest",
+          nameTextStyle: { color: "#0e7490", fontSize: 11 },
+          axisLabel: { color: "#0e7490", formatter: formatCompactUsd },
+          splitLine: { lineStyle: { color: "#edf2f7" } },
+        },
+        {
+          type: "value",
+          gridIndex: 4,
+          position: "right",
+          scale: true,
+          min: (value) => Math.min(value.min, 0),
+          max: (value) => Math.max(value.max, 0),
+          name: "Premium",
+          nameTextStyle: { color: "#c11574", fontSize: 11 },
+          axisLine: { lineStyle: { color: "#c11574" } },
           axisLabel: { color: "#c11574", formatter: formatBps },
+          splitLine: { show: false },
+        },
+        {
+          type: "value",
+          gridIndex: 4,
+          position: "right",
+          offset: 68,
+          scale: true,
+          name: "BTC price",
+          nameTextStyle: { color: "#475467", fontSize: 11 },
+          axisLabel: { color: "#475467", formatter: formatPrice },
           splitLine: { show: false },
         },
       ],
@@ -305,6 +430,16 @@ export default function MarketMicrostructureChart({
           emphasis: { focus: "series" },
         },
         {
+          name: "WS mid",
+          type: "line",
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          data: wsMidData,
+          showSymbol: false,
+          lineStyle: { color: "#344054", width: 1.35 },
+          emphasis: { focus: "series" },
+        },
+        {
           name: "Net taker",
           type: "bar",
           xAxisIndex: 1,
@@ -314,6 +449,18 @@ export default function MarketMicrostructureChart({
           itemStyle: {
             color: (params) => (Number(params.value?.[2]) >= 0 ? "#067647" : "#b42318"),
             opacity: 0.82,
+          },
+        },
+        {
+          name: "Net liquidation",
+          type: "bar",
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: netLiquidationData,
+          barMaxWidth: 4,
+          itemStyle: {
+            color: (params) => (Number(params.value?.[2]) >= 0 ? "#0e7490" : "#c11574"),
+            opacity: 0.58,
           },
         },
         {
@@ -344,10 +491,28 @@ export default function MarketMicrostructureChart({
           lineStyle: { color: "#b54708", width: 1.5, type: "dashed" },
         },
         {
-          name: "Open interest",
+          name: "WS spread",
           type: "line",
           xAxisIndex: 3,
           yAxisIndex: 4,
+          data: wsSpreadData,
+          showSymbol: false,
+          lineStyle: { color: "#f79009", width: 1.8 },
+        },
+        {
+          name: "Book updates",
+          type: "bar",
+          xAxisIndex: 3,
+          yAxisIndex: 5,
+          data: bookUpdateData,
+          barMaxWidth: 4,
+          itemStyle: { color: "#667085", opacity: 0.34 },
+        },
+        {
+          name: "Open interest",
+          type: "line",
+          xAxisIndex: 4,
+          yAxisIndex: 6,
           data: openInterestData,
           showSymbol: false,
           lineStyle: { color: "#0e7490", width: 1.8 },
@@ -355,15 +520,31 @@ export default function MarketMicrostructureChart({
         {
           name: "Premium",
           type: "line",
-          xAxisIndex: 3,
-          yAxisIndex: 5,
+          xAxisIndex: 4,
+          yAxisIndex: 7,
           data: premiumData,
           showSymbol: false,
-          lineStyle: { color: "#c11574", width: 1.5, type: "dashed" },
+          lineStyle: { color: "#c11574", width: 1.8 },
+          markLine: {
+            symbol: "none",
+            silent: true,
+            label: { show: false },
+            lineStyle: { color: "#98a2b3", type: "dashed", width: 1 },
+            data: [{ yAxis: 0 }],
+          },
+        },
+        {
+          name: "BTC on OI",
+          type: "line",
+          xAxisIndex: 4,
+          yAxisIndex: 8,
+          data: priceData,
+          showSymbol: false,
+          lineStyle: { color: "#475467", width: 1.6, opacity: 0.82 },
         },
       ],
     };
-  }, [buckets, marketEnd, marketStart, positionSeries, priceSeries]);
+  }, [buckets, marketEnd, marketStart, positionSeries, priceSeries, webSocketSummaries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;

@@ -130,6 +130,81 @@ create index if not exists derivative_position_samples_symbol_source_time_idx
 create index if not exists derivative_position_samples_time_idx
   on derivative_position_samples (scheduled_at desc);
 
+create table if not exists polymarket_5m_btc_markets (
+  source text not null default 'polymarket_gamma',
+  market_id text not null references markets(id) on delete cascade,
+  symbol text not null,
+  slug text not null,
+  polymarket_market_id text,
+  condition_id text,
+  start_time timestamptz not null,
+  end_time timestamptz not null,
+  gamma_start_date timestamptz,
+  gamma_end_date timestamptz,
+  up_token_id text,
+  down_token_id text,
+  price_to_beat numeric(20, 8),
+  end_price numeric(20, 8),
+  winning_outcome text check (winning_outcome in ('up', 'down', 'unknown') or winning_outcome is null),
+  active boolean,
+  closed boolean,
+  accepting_orders boolean,
+  automatically_resolved boolean,
+  gamma_status text,
+  discovered_at timestamptz not null default now(),
+  last_metadata_refresh_at timestamptz,
+  resolved_at timestamptz,
+  raw_gamma jsonb,
+  primary key (source, market_id),
+  unique (source, slug),
+  constraint polymarket_5m_btc_markets_window_check
+    check (end_time = start_time + interval '5 minutes')
+);
+
+create index if not exists polymarket_5m_btc_markets_symbol_source_time_idx
+  on polymarket_5m_btc_markets (symbol, source, start_time desc);
+
+create index if not exists polymarket_5m_btc_markets_slug_idx
+  on polymarket_5m_btc_markets (slug);
+
+create index if not exists polymarket_5m_btc_markets_refresh_idx
+  on polymarket_5m_btc_markets (end_time desc, last_metadata_refresh_at)
+  where closed is distinct from true
+     or end_price is null
+     or winning_outcome is null
+     or winning_outcome = 'unknown';
+
+create table if not exists polymarket_probability_samples (
+  source text not null default 'polymarket_clob_midpoints',
+  market_id text not null references markets(id) on delete cascade,
+  symbol text not null,
+  slug text not null,
+  scheduled_at timestamptz not null,
+  collected_at timestamptz not null default now(),
+  sample_type text not null check (sample_type in ('normal', 'final_ramp')),
+  up_token_id text not null,
+  down_token_id text not null,
+  up_probability numeric(20, 12),
+  down_probability numeric(20, 12),
+  up_probability_normalized numeric(20, 12),
+  down_probability_normalized numeric(20, 12),
+  probability_sum numeric(20, 12),
+  request_latency_ms integer,
+  quality text not null check (quality in ('complete', 'partial', 'missing')),
+  raw_response jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (source, market_id, scheduled_at)
+);
+
+create index if not exists polymarket_probability_samples_symbol_source_time_idx
+  on polymarket_probability_samples (symbol, source, scheduled_at desc);
+
+create index if not exists polymarket_probability_samples_slug_time_idx
+  on polymarket_probability_samples (slug, scheduled_at desc);
+
+create index if not exists polymarket_probability_samples_market_idx
+  on polymarket_probability_samples (market_id, scheduled_at);
 create table if not exists futures_ws_1s_summaries (
   source text not null,
   instrument_type text not null,

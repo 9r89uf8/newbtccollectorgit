@@ -10,7 +10,7 @@ The collector tracks one symbol by default:
 BTCUSDT
 ```
 
-It records three data families.
+It records four data families.
 
 | Family | Source | Instrument type | Endpoint | Stored data |
 | --- | --- | --- | --- | --- |
@@ -19,10 +19,11 @@ It records three data families.
 | Aggregate trades | `binance_futures` | `futures` | `/fapi/v1/aggTrades` | Raw aggregate trades for each completed market. |
 | Top-20 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=20` | Derived top-of-book and depth metrics at each scheduled sample time. |
 | Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, premium, funding, and current open interest on a 5 second cadence. |
+| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata and paired Up/Down midpoint probabilities. |
 | Top-of-book updates | `binance_futures_ws` | `futures` | WebSocket `@bookTicker` | One-second top-of-book summaries. Raw messages are not stored. |
 | Liquidation events | `binance_futures_ws` | `futures` | WebSocket `@forceOrder` | One-second liquidation notional summaries. Raw events are not stored. |
 
-The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`.
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, and CLOB midpoint probability samples are written to `polymarket_probability_samples`.
 
 ## Sampling Schedule
 
@@ -108,6 +109,33 @@ scheduled_at >= market.start_time
 and scheduled_at < market.end_time
 ```
 
+
+## Polymarket BTC 5 Minute Probabilities
+
+Polymarket markets are discovered by deterministic slug:
+
+```text
+btc-updown-5m-<utc_start_epoch_seconds>
+```
+
+The slug epoch defines the 5 minute UTC window. Gamma `startDate` and `startDateIso` are treated as Polymarket creation/series metadata, not as the collector market start time.
+
+Probability samples use the same pre-close cadence as the existing collector and do not include a close-boundary sample:
+
+| Window offset | Frequency | Sample type |
+| --- | --- | --- |
+| `0s` through `275s` | Every 5 seconds | `normal` |
+| `280s` through `299s` | Every 1 second | `final_ramp` |
+
+Expected Polymarket probability samples per complete market:
+
+```text
+56 normal samples
+20 final_ramp samples
+76 total probability samples
+```
+
+Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Settlement metadata such as `price_to_beat`, `end_price`, and `winning_outcome` is refreshed from Gamma after close and can arrive later than `market.end_time`.
 ## Market Status
 
 The `markets.status` field can be:
@@ -475,6 +503,8 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 | `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
+| `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
+| `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities at each pre-close sample timestamp. |
 | `collector_heartbeats` | Stores latest collector status. |
 | `collection_errors` | Stores request and collection failures. |
 
@@ -488,4 +518,5 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 - Futures microstructure collection is enabled by default and can be disabled with `ENABLE_FUTURES_MICROSTRUCTURE=false`.
 - Futures positioning collection is enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.
 - Futures WebSocket summary collection is enabled by default and can be disabled with `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false`.
+- Polymarket BTC 5 minute probability collection is enabled by default and can be disabled with `ENABLE_POLYMARKET_BTC_5M=false`.
 - WebSocket storage is summary-only. Raw WebSocket messages and raw liquidation events are intentionally not stored.

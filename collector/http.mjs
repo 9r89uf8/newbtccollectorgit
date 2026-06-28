@@ -1,12 +1,18 @@
 import { performance } from "node:perf_hooks";
 
-export async function fetchJson(url, timeoutMs) {
+async function requestJson(url, { timeoutMs, method = "GET", body = undefined } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const started = performance.now();
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const headers = body === undefined ? undefined : { "content-type": "application/json" };
+    const response = await fetch(url, {
+      method,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      headers,
+      signal: controller.signal,
+    });
     const latencyMs = Math.round(performance.now() - started);
 
     if (!response.ok) {
@@ -20,4 +26,12 @@ export async function fetchJson(url, timeoutMs) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function fetchJson(url, timeoutMs) {
+  return requestJson(url, { timeoutMs });
+}
+
+export async function postJson(url, body, timeoutMs) {
+  return requestJson(url, { timeoutMs, method: "POST", body });
 }

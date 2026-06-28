@@ -7,6 +7,8 @@ const { closePool, getPool, hasDatabaseConfig } = await import("../lib/db.js");
 const CONFIRMATION = "DELETE_ALL_MARKET_DATA";
 const DATA_TABLES = [
   "market_forward_labels",
+  "polymarket_probability_samples",
+  "polymarket_5m_btc_markets",
   "market_labels",
   "market_features",
   "market_position_features",

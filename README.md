@@ -76,6 +76,7 @@ The collector records the original spot/futures last-price samples and, by defau
 - One derived `market_classifications` row per closed market
 - Per-timestamp `market_feature_buckets` rows inside each market
 - Forward outcome labels for 1s, 5s, 10s, 15s, 30s, and 60s horizons
+- Polymarket 5 minute BTC Up/Down market metadata and CLOB midpoint probabilities
 
 Relevant env settings:
 
@@ -83,12 +84,14 @@ Relevant env settings:
 ENABLE_FUTURES_MICROSTRUCTURE=true
 ENABLE_FUTURES_POSITIONING=true
 ENABLE_FUTURES_WEBSOCKET_SUMMARIES=true
+ENABLE_POLYMARKET_BTC_5M=true
+POLYMARKET_TIMEOUT_MS=4000
 FORWARD_LABEL_MIN_THRESHOLD_BPS=1
 LARGE_TRADE_QUOTE_THRESHOLD=1000000
 MAX_AGG_TRADE_PAGES_PER_MARKET=30
 ```
 
-Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed.
+Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector plus Polymarket, unless Polymarket is separately disabled. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed. Set `ENABLE_POLYMARKET_BTC_5M=false` to disable Polymarket probability collection.
 
 After the bucket schema exists, existing closed markets can be materialized with:
 
@@ -115,10 +118,12 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `market_classifications`
 - `market_feature_buckets`
 - `market_forward_labels`
+- `polymarket_5m_btc_markets`
+- `polymarket_probability_samples`
 - `collector_heartbeats`
 - `collection_errors`
 
-`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `futures_ws_1s_summaries`, and `market_forward_labels` into hypertables.
+`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `polymarket_probability_samples`, `futures_ws_1s_summaries`, and `market_forward_labels` into hypertables.
 
 ## Health endpoint
 

@@ -8,6 +8,12 @@ const BINANCE_FUTURES_BASE_URL = (
 const BINANCE_FUTURES_WS_BASE_URL = (
   process.env.BINANCE_FUTURES_WS_BASE_URL || "wss://fstream.binance.com/stream"
 ).replace(/\/+$/, "");
+const POLYMARKET_GAMMA_BASE_URL = (
+  process.env.POLYMARKET_GAMMA_BASE_URL || "https://gamma-api.polymarket.com"
+).replace(/\/+$/, "");
+const POLYMARKET_CLOB_BASE_URL = (
+  process.env.POLYMARKET_CLOB_BASE_URL || "https://clob.polymarket.com"
+).replace(/\/+$/, "");
 
 function readPositiveNumber(name, fallback) {
   const value = Number(process.env[name] || fallback);
@@ -41,16 +47,22 @@ export const FINAL_RAMP_INTERVAL_MS = 1000;
 export const MARKET_CLOSE_MS = 300 * 1000;
 export const EXPECTED_PRICE_SAMPLES_PER_SOURCE = 77;
 export const EXPECTED_BOOK_SAMPLES_PER_MARKET = 76;
+export const EXPECTED_POLYMARKET_PROBABILITY_SAMPLES_PER_MARKET = 76;
 
 export const COLLECTOR_NAME = process.env.COLLECTOR_NAME || "btc-price-collector";
 export const SYMBOL = process.env.COLLECTOR_SYMBOL || "BTCUSDT";
 export const REQUEST_TIMEOUT_MS = readPositiveNumber("BINANCE_TIMEOUT_MS", 4000);
+export const POLYMARKET_TIMEOUT_MS = readPositiveNumber("POLYMARKET_TIMEOUT_MS", REQUEST_TIMEOUT_MS);
 export const ENABLE_FUTURES_MICROSTRUCTURE = readBoolean(
   "ENABLE_FUTURES_MICROSTRUCTURE",
   true
 );
 export const ENABLE_FUTURES_POSITIONING = readBoolean("ENABLE_FUTURES_POSITIONING", true);
-export const ENABLE_FUTURES_WEBSOCKET_SUMMARIES = readBoolean("ENABLE_FUTURES_WEBSOCKET_SUMMARIES", true);
+export const ENABLE_FUTURES_WEBSOCKET_SUMMARIES = readBoolean(
+  "ENABLE_FUTURES_WEBSOCKET_SUMMARIES",
+  true
+);
+export const ENABLE_POLYMARKET_BTC_5M = readBoolean("ENABLE_POLYMARKET_BTC_5M", true);
 export const POSITION_SAMPLE_INTERVAL_MS = 5 * 1000;
 export const EXPECTED_POSITION_SAMPLES_PER_MARKET =
   MARKET_MS / POSITION_SAMPLE_INTERVAL_MS;
@@ -95,6 +107,15 @@ export const PRICE_SOURCES = [
     }),
   },
 ];
+
+export const POLYMARKET_5M_BTC_SOURCE = {
+  marketSource: "polymarket_gamma",
+  probabilitySource: "polymarket_clob_midpoints",
+  instrumentType: "prediction_market",
+  gammaMarketBySlugUrl: (slug) =>
+    `${POLYMARKET_GAMMA_BASE_URL}/markets/slug/${encodeURIComponent(slug)}`,
+  midpointsUrl: () => `${POLYMARKET_CLOB_BASE_URL}/midpoints`,
+};
 
 export const FUTURES_MICROSTRUCTURE_SOURCE = {
   source: "binance_futures",

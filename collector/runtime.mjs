@@ -4,6 +4,9 @@ import {
   ENABLE_FUTURES_MICROSTRUCTURE,
   ENABLE_FUTURES_POSITIONING,
   ENABLE_FUTURES_WEBSOCKET_SUMMARIES,
+  ENABLE_POLYMARKET_BTC_5M,
+  EXPECTED_POLYMARKET_PROBABILITY_SAMPLES_PER_MARKET,
+  POLYMARKET_5M_BTC_SOURCE,
   SYMBOL,
 } from "./config.mjs";
 import { collectFuturesAggregateTradesForMarket } from "./aggTrades.mjs";
@@ -23,6 +26,12 @@ import { writeMarketFeatureBuckets } from "./marketFeatureBuckets.mjs";
 import { writeMarketFeatures } from "./marketFeatures.mjs";
 import { writeMarketLabels } from "./marketLabels.mjs";
 import { writeMarketPositionFeatures } from "./marketPositionFeatures.mjs";
+import {
+  collectPolymarketProbabilitySample,
+  getPolymarketProbabilitySampleStats,
+  refreshPolymarketMarketMetadata,
+  refreshRecentPolymarketSettlements,
+} from "./polymarketSamples.mjs";
 import { collectPriceSamples } from "./priceSamples.mjs";
 import {
   getMarketWindow,
@@ -64,8 +73,21 @@ async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {
   await heartbeat(COLLECTOR_NAME, "error", market.id, message);
 }
 
+async function recordPolymarketRuntimeError(marketId, errorType, error, source) {
+  await recordError({
+    marketId,
+    source,
+    errorType: error.name === "AbortError" ? "timeout" : errorType,
+    message: error.message || String(error),
+  });
+}
+
 async function collectScheduledData(market, scheduledAt, sampleType) {
   const tasks = [collectPriceSamples(market, scheduledAt, sampleType)];
+
+  if (ENABLE_POLYMARKET_BTC_5M) {
+    tasks.push(collectPolymarketProbabilitySample(market, scheduledAt, sampleType));
+  }
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     tasks.push(collectFuturesBookSample(market, scheduledAt, sampleType));
@@ -102,12 +124,38 @@ export async function closeMarket(market) {
   let classificationResult = null;
   let forwardResult = null;
   let forwardRefreshResult = null;
+  let polymarketStats = null;
+  let polymarketRefreshResult = null;
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     await collectFuturesAggregateTradesForMarket(market);
   }
 
   const labels = await writeMarketLabels(market);
+
+  if (ENABLE_POLYMARKET_BTC_5M) {
+    try {
+      await refreshPolymarketMarketMetadata(market);
+    } catch (error) {
+      await recordPolymarketRuntimeError(
+        market.id,
+        "polymarket_metadata_refresh_error",
+        error,
+        POLYMARKET_5M_BTC_SOURCE.marketSource
+      );
+    }
+
+    try {
+      polymarketStats = await getPolymarketProbabilitySampleStats(market);
+    } catch (error) {
+      await recordPolymarketRuntimeError(
+        market.id,
+        "polymarket_probability_stats_error",
+        error,
+        POLYMARKET_5M_BTC_SOURCE.probabilitySource
+      );
+    }
+  }
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     featureResult = await writeMarketFeatures(market);
@@ -136,6 +184,9 @@ export async function closeMarket(market) {
   const behaviorMessage = behaviorResult ? `; behavior ${behaviorResult.shape_class}` : "";
   const classificationMessage = classificationResult ? `; class ${classificationResult.primary_class}` : "";
   const forwardMessage = forwardResult ? `; forward labels ${forwardResult.labelCount}` : "";
+  const polymarketMessage = polymarketStats
+    ? `; polymarket ${polymarketStats.sample_count}/${EXPECTED_POLYMARKET_PROBABILITY_SAMPLES_PER_MARKET} samples, ${polymarketStats.complete_count} complete`
+    : "";
 
   await updateMarketStatus(market.id, status);
 
@@ -143,8 +194,24 @@ export async function closeMarket(market) {
     forwardRefreshResult = await refreshRecentForwardLabels();
   }
 
+  if (ENABLE_POLYMARKET_BTC_5M) {
+    try {
+      polymarketRefreshResult = await refreshRecentPolymarketSettlements();
+    } catch (error) {
+      await recordPolymarketRuntimeError(
+        market.id,
+        "polymarket_settlement_refresh_error",
+        error,
+        POLYMARKET_5M_BTC_SOURCE.marketSource
+      );
+    }
+  }
+
   const forwardRefreshMessage = forwardRefreshResult?.labelCount
     ? `; refreshed ${forwardRefreshResult.labelCount}`
+    : "";
+  const polymarketRefreshMessage = polymarketRefreshResult?.refreshedCount
+    ? `; polymarket metadata refreshed ${polymarketRefreshResult.refreshedCount}`
     : "";
   const incompleteMarkerMessage = wasMarkedIncomplete ? "; premarked incomplete" : "";
 
@@ -152,7 +219,7 @@ export async function closeMarket(market) {
     COLLECTOR_NAME,
     "running",
     market.id,
-    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${forwardRefreshMessage}${incompleteMarkerMessage}`
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${polymarketMessage}${forwardRefreshMessage}${polymarketRefreshMessage}${incompleteMarkerMessage}`
   );
 }
 
@@ -176,6 +243,18 @@ export async function runCollector() {
   }
 
   await closeDueMarkets();
+  if (ENABLE_POLYMARKET_BTC_5M) {
+    try {
+      await refreshRecentPolymarketSettlements();
+    } catch (error) {
+      await recordPolymarketRuntimeError(
+        null,
+        "polymarket_settlement_refresh_error",
+        error,
+        POLYMARKET_5M_BTC_SOURCE.marketSource
+      );
+    }
+  }
 
   const startupMarket = getMarketWindow();
   await upsertMarket(startupMarket);

@@ -169,19 +169,24 @@ systemctl start newbtccollector-collector
 systemctl status newbtccollector-collector --no-pager
 ```
 
-## 3. Clear Collected Data
+## 3. Delete All Collected Data
 
-This clears all collector rows while preserving the schema, indexes, and database user. Stop the collector first so it does not immediately write new rows.
+Use this when you want to wipe the collected market data and start fresh while keeping the database schema, indexes, and database user. Stop the collector first; the WebSocket collector runs inside the same `newbtccollector-collector` service, so one stop command pauses both REST collection and WebSocket collection.
 
 ```bash
 cd /opt/newbtccollector
 systemctl stop newbtccollector-collector
+
+# Preview the rows that will be deleted.
 npm run db:clear-data -- --dry-run
+
+# Delete all collector data.
 npm run db:clear-data -- --confirm=DELETE_ALL_MARKET_DATA
+
 systemctl start newbtccollector-collector
 ```
 
-If the script detects a recent non-stopped collector heartbeat, it refuses to clear data unless you also pass `--allow-running-collector`.
+The dry run does not delete anything. The confirm command truncates the collector data tables, resets table identities, and preserves the schema. If the script detects a recent non-stopped collector heartbeat, it refuses to clear data unless you also pass `--allow-running-collector`.
 
 ## 4. Deploy Code Changes And Restart
 

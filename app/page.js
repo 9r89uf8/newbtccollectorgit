@@ -18,6 +18,19 @@ function formatUtc(value) {
   }).format(date) + " UTC";
 }
 
+function formatUtcDate(value) {
+  if (!value) return "-";
+  const date = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  }).format(date);
+}
+
 function formatPrice(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -29,27 +42,10 @@ function formatPrice(value) {
   }).format(number);
 }
 
-function formatCompactUsd(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    notation: "compact",
-    maximumFractionDigits: 2,
-  }).format(number);
-}
-
 function formatPct(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${number >= 0 ? "+" : ""}${number.toFixed(4)}%`;
-}
-
-function formatDecimal(value, digits = 3) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
 }
 
 function statusClass(status) {
@@ -62,13 +58,6 @@ function statusClass(status) {
 function directionClass(direction) {
   if (direction === "up") return "direction-up";
   if (direction === "down") return "direction-down";
-  return "direction-flat";
-}
-
-function signedClass(value) {
-  const number = Number(value);
-  if (number > 0) return "number-positive";
-  if (number < 0) return "number-negative";
   return "direction-flat";
 }
 
@@ -182,7 +171,7 @@ function MarketRows({ markets }) {
       <div className="panel-heading">
         <div>
           <p className="panel-label">Markets</p>
-          <h2>Recent 5 minute windows</h2>
+          <h2>Latest 3 five minute windows</h2>
         </div>
       </div>
       <div className="table-scroll">
@@ -235,194 +224,45 @@ function MarketRows({ markets }) {
   );
 }
 
-function FeaturePanel({ featureStats, recentFeatures }) {
-  const stats = featureStats[0] || null;
+function MarketDailyCounts({ dailyMarketCounts }) {
+  const rows = dailyMarketCounts || [];
 
   return (
-    <section className="panel stats-panel feature-panel">
+    <section className="panel stats-panel daily-market-panel">
       <div className="panel-heading">
         <div>
-          <p className="panel-label">Futures microstructure</p>
-          <h2>Taker flow and book depth</h2>
+          <p className="panel-label">Coverage</p>
+          <h2>Markets by UTC day</h2>
         </div>
+        <span className="status-pill status-muted">since Jun 27, 2026</span>
       </div>
-      {!stats && recentFeatures.length === 0 ? (
-        <p className="muted">No feature rows yet.</p>
+      {rows.length === 0 ? (
+        <p className="muted">No markets counted since Jun 27, 2026.</p>
       ) : (
-        <>
-          <div className="feature-summary-grid">
-            <div>
-              <span>24h rows</span>
-              <strong>{stats?.feature_rows ?? 0}</strong>
-            </div>
-            <div>
-              <span>Avg taker imb.</span>
-              <strong className={signedClass(stats?.avg_taker_imbalance)}>{formatDecimal(stats?.avg_taker_imbalance)}</strong>
-            </div>
-            <div>
-              <span>Avg book imb.</span>
-              <strong className={signedClass(stats?.avg_book_imbalance_5bps)}>{formatDecimal(stats?.avg_book_imbalance_5bps)}</strong>
-            </div>
-          </div>
-          <div className="feature-list">
-            {recentFeatures.slice(0, 3).map((feature) => (
-              <article className="feature-item" key={`${feature.market_id}-${feature.source}`}>
-                <div className="feature-item-top">
-                  <div>
-                    <Link className="market-link" href={`/markets/${encodeURIComponent(feature.market_id)}`}>{formatUtc(feature.start_time)}</Link>
-                    <span>{feature.source}</span>
-                  </div>
-                  <span className={`status-pill ${statusClass(feature.feature_quality)}`}>{feature.feature_quality}</span>
-                </div>
-                <div className="feature-values">
-                  <div>
-                    <span>Net taker</span>
-                    <strong className={signedClass(feature.net_taker_quote)}>{formatCompactUsd(feature.net_taker_quote)}</strong>
-                  </div>
-                  <div>
-                    <span>Taker imb.</span>
-                    <strong className={signedClass(feature.taker_imbalance)}>{formatDecimal(feature.taker_imbalance)}</strong>
-                  </div>
-                  <div>
-                    <span>Book imb.</span>
-                    <strong className={signedClass(feature.avg_book_imbalance_5bps)}>{formatDecimal(feature.avg_book_imbalance_5bps)}</strong>
-                  </div>
-                  <div>
-                    <span>Spread</span>
-                    <strong>{formatDecimal(feature.avg_spread_bps, 2)}</strong>
-                  </div>
-                </div>
-                <p className="feature-footnote">
-                  {feature.agg_trade_count || 0} trades, {feature.book_sample_count || 0} book samples, {formatPct(feature.return_pct)} {feature.direction || "label"}
-                </p>
-              </article>
-            ))}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-function FeatureBucketPanel({ buckets }) {
-  return (
-    <section className="panel stats-panel bucket-panel">
-      <div className="panel-heading">
-        <div>
-          <p className="panel-label">Timestamp buckets</p>
-          <h2>Recent interval summaries</h2>
-        </div>
-      </div>
-      {buckets.length === 0 ? (
-        <p className="muted">No bucket rows yet.</p>
-      ) : (
-        <div className="bucket-list">
-          {buckets.slice(0, 5).map((bucket) => (
-            <article className="bucket-item" key={`${bucket.market_id}-${bucket.source}-${bucket.bucket_start}`}>
-              <div className="feature-item-top">
+        <div className="daily-market-list">
+          {rows.map((day) => {
+            const href = `/markets?day=${encodeURIComponent(day.market_day)}`;
+            return (
+              <div className="daily-market-row" key={day.market_day}>
                 <div>
-                  <Link className="market-link" href={`/markets/${encodeURIComponent(bucket.market_id)}`}>{formatUtc(bucket.bucket_start)}</Link>
-                  <span>{Number(bucket.bucket_seconds).toFixed(0)}s window</span>
+                  <Link className="daily-market-date-link" href={href}>{formatUtcDate(day.market_day)}</Link>
+                  <span>
+                    {day.closed_count} closed, {day.open_count} open, {day.incomplete_count} incomplete
+                  </span>
                 </div>
-                <span className={`status-pill ${statusClass(bucket.bucket_quality)}`}>{bucket.bucket_quality}</span>
+                <Link className="daily-market-count" href={href} aria-label={`View markets for ${day.market_day}`}>
+                  <b>{day.markets_total}</b>
+                  <span>markets</span>
+                </Link>
               </div>
-              <div className="feature-values">
-                <div>
-                  <span>Net taker</span>
-                  <strong className={signedClass(bucket.net_taker_quote)}>{formatCompactUsd(bucket.net_taker_quote)}</strong>
-                </div>
-                <div>
-                  <span>Taker imb.</span>
-                  <strong className={signedClass(bucket.taker_imbalance)}>{formatDecimal(bucket.taker_imbalance)}</strong>
-                </div>
-                <div>
-                  <span>Book imb.</span>
-                  <strong className={signedClass(bucket.book_imbalance_5bps)}>{formatDecimal(bucket.book_imbalance_5bps)}</strong>
-                </div>
-                <div>
-                  <span>Spread</span>
-                  <strong>{formatDecimal(bucket.spread_bps, 2)}</strong>
-                </div>
-              </div>
-              <p className="feature-footnote">
-                {bucket.agg_trade_count || 0} trades, {formatPct(bucket.return_pct)} {bucket.direction || "move"}
-              </p>
-            </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
   );
 }
 
-function WebSocketPanel({ stats, summaries, forwardLabels }) {
-  const completeLabels = forwardLabels.reduce((total, row) => {
-    return row.quality === "complete" ? total + Number(row.count || 0) : total;
-  }, 0);
-
-  return (
-    <section className="panel stats-panel">
-      <div className="panel-heading">
-        <div>
-          <p className="panel-label">WebSocket summaries</p>
-          <h2>1 second futures rows</h2>
-        </div>
-      </div>
-      <div className="feature-summary-grid">
-        <div>
-          <span>1h rows</span>
-          <strong>{stats?.bucket_count ?? 0}</strong>
-        </div>
-        <div>
-          <span>Book updates</span>
-          <strong>{stats?.book_ticker_updates ?? 0}</strong>
-        </div>
-        <div>
-          <span>Liq events</span>
-          <strong>{stats?.liquidation_count ?? 0}</strong>
-        </div>
-      </div>
-      {summaries.length === 0 ? (
-        <p className="muted">No WebSocket summaries yet.</p>
-      ) : (
-        <div className="feature-list">
-          {summaries.slice(0, 3).map((summary) => (
-            <article className="feature-item" key={`${summary.bucket_start}-${summary.summary_quality}`}>
-              <div className="feature-item-top">
-                <div>
-                  <strong>{formatUtc(summary.bucket_start)}</strong>
-                  <span>{summary.book_ticker_update_count || 0} book updates</span>
-                </div>
-                <span className={`status-pill ${statusClass(summary.summary_quality)}`}>{summary.summary_quality}</span>
-              </div>
-              <div className="feature-values">
-                <div>
-                  <span>Mid</span>
-                  <strong>{formatPrice(summary.mid_price_close)}</strong>
-                </div>
-                <div>
-                  <span>1s move bps</span>
-                  <strong className={signedClass(summary.mid_return_bps)}>{formatDecimal(summary.mid_return_bps, 2)}</strong>
-                </div>
-                <div>
-                  <span>Spread bps</span>
-                  <strong>{formatDecimal(summary.spread_bps_avg, 2)}</strong>
-                </div>
-                <div>
-                  <span>Net liq</span>
-                  <strong className={signedClass(summary.liquidation_net_quote)}>{formatCompactUsd(summary.liquidation_net_quote)}</strong>
-                </div>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-      <p className="feature-footnote">
-        {completeLabels} complete forward labels over the last 24h.
-      </p>
-    </section>
-  );
-}
 function ErrorList({ errors }) {
   return (
     <section className="panel error-panel">
@@ -510,13 +350,7 @@ export default async function Home() {
       <div className="content-grid">
         <MarketRows markets={data.recentMarkets} />
         <div className="side-stack">
-          <FeaturePanel featureStats={data.featureStats} recentFeatures={data.recentFeatures} />
-          <FeatureBucketPanel buckets={data.recentFeatureBuckets} />
-          <WebSocketPanel
-            stats={data.websocketStats}
-            summaries={data.recentWebSocketSummaries}
-            forwardLabels={data.forwardLabelStats}
-          />
+          <MarketDailyCounts dailyMarketCounts={data.dailyMarketCounts} />
           <DirectionStats directionStats={data.directionStats} />
           <ErrorList errors={data.recentErrors} />
         </div>

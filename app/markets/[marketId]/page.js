@@ -641,6 +641,11 @@ export default async function MarketDetailPage({ params }) {
     microprice_bps_from_mid_close: toChartNumber(summary.microprice_bps_from_mid_close),
     avg_event_lag_ms: toChartNumber(summary.avg_event_lag_ms),
   }));
+  const chartPolymarketProbabilities = data.polymarketProbabilitySeries.map((sample) => ({
+    time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
+    up_probability: toChartNumber(sample.up_probability),
+    down_probability: toChartNumber(sample.down_probability),
+  }));
 
   return (
     <main className="dashboard-shell market-detail-shell">
@@ -690,6 +695,7 @@ export default async function MarketDetailPage({ params }) {
           buckets={chartBuckets}
           positionSeries={chartPositionSeries}
           webSocketSummaries={chartWebSocketSummaries}
+          polymarketProbabilities={chartPolymarketProbabilities}
         />
       </section>
 

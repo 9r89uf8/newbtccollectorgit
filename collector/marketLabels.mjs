@@ -1,5 +1,5 @@
 import { query } from "../lib/db.js";
-import { EXPECTED_PRICE_SAMPLES_PER_SOURCE, PRICE_SOURCES } from "./config.mjs";
+import { MIN_COMPLETE_PRICE_LABEL_SAMPLES, PRICE_SOURCES } from "./config.mjs";
 
 async function labelSource(market, sourceConfig) {
   const sampleResult = await query(
@@ -57,7 +57,7 @@ async function labelSource(market, sourceConfig) {
   const hasExactOpen = new Date(row.first_sample_at).getTime() === market.startMs;
   const hasExactClose = new Date(row.last_sample_at).getTime() === market.endMs;
   const quality =
-    sampleCount >= EXPECTED_PRICE_SAMPLES_PER_SOURCE && hasExactOpen && hasExactClose
+    sampleCount >= MIN_COMPLETE_PRICE_LABEL_SAMPLES && hasExactOpen && hasExactClose
       ? "complete"
       : "partial";
 

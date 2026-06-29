@@ -35,7 +35,7 @@ Every market is a 5 minute UTC window.
 | `280s` through `299s` | Every 1 second | `final_ramp` |
 | `300s` | Once at the exact close boundary | `close` |
 
-Expected last-price samples per source per complete market:
+Ideal last-price samples per source per complete market:
 
 ```text
 56 normal samples
@@ -164,10 +164,12 @@ After a market closes, the collector creates one label per price source in `mark
 A source label is `complete` when:
 
 ```text
-sample_count >= 77
+sample_count >= 76
 first sample timestamp equals market start_time
 last sample timestamp equals market end_time
 ```
+
+The ideal dense schedule has 77 samples. Labels accept 76 when the exact open and close boundary samples exist, because the collector can spend the first few seconds of a new window closing and materializing the previous window. In that case the market outcome label is still valid even if one interior price sample is absent.
 
 Otherwise it is `partial` if open and close samples exist, or `missing` if no usable samples exist.
 

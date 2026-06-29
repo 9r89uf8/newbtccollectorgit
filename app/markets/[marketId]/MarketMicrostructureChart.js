@@ -84,6 +84,12 @@ function formatDecimal(value, digits = 3) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
 }
 
+function formatProbability(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${(number * 100).toFixed(1)}%`;
+}
+
 function formatBps(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -193,6 +199,7 @@ export default function MarketMicrostructureChart({
   buckets,
   positionSeries = [],
   webSocketSummaries = [],
+  polymarketProbabilities = [],
 }) {
   const chartRef = useRef(null);
   const [activeHelpId, setActiveHelpId] = useState(null);
@@ -231,6 +238,13 @@ export default function MarketMicrostructureChart({
         avgEventLagMs: finiteNumber(summary.avg_event_lag_ms),
       }))
       .filter((summary) => summary.time !== null);
+    const polymarketRows = polymarketProbabilities
+      .map((sample) => ({
+        time: toTimeValue(sample.time),
+        upProbability: finiteNumber(sample.up_probability),
+        downProbability: finiteNumber(sample.down_probability),
+      }))
+      .filter((sample) => sample.time !== null);
 
     const netTakerData = bucketRows
       .filter((bucket) => bucket.netTaker !== null)
@@ -273,6 +287,12 @@ export default function MarketMicrostructureChart({
         signedLogNetTaker(summary.netLiquidation),
         summary.netLiquidation,
       ]);
+    const marketUpData = polymarketRows
+      .filter((sample) => sample.upProbability !== null)
+      .map((sample) => [sample.time, sample.upProbability]);
+    const marketDownData = polymarketRows
+      .filter((sample) => sample.downProbability !== null)
+      .map((sample) => [sample.time, sample.downProbability]);
     const start = toTimeValue(marketStart);
     const end = toTimeValue(marketEnd);
 
@@ -416,6 +436,17 @@ export default function MarketMicrostructureChart({
           axisLabel: { color: "#475467", formatter: formatPrice },
           splitLine: { show: false },
         },
+        {
+          type: "value",
+          gridIndex: 0,
+          position: "right",
+          min: 0,
+          max: 1,
+          name: "Market",
+          nameTextStyle: { color: "#475467", fontSize: 11 },
+          axisLabel: { color: "#475467", formatter: formatProbability },
+          splitLine: { show: false },
+        },
       ],
       series: [
         {
@@ -437,6 +468,26 @@ export default function MarketMicrostructureChart({
           data: wsMidData,
           showSymbol: false,
           lineStyle: { color: "#344054", width: 1.35 },
+          emphasis: { focus: "series" },
+        },
+        {
+          name: "Market Up",
+          type: "line",
+          xAxisIndex: 0,
+          yAxisIndex: 9,
+          data: marketUpData,
+          showSymbol: false,
+          lineStyle: { color: "#039855", width: 1.8 },
+          emphasis: { focus: "series" },
+        },
+        {
+          name: "Market Down",
+          type: "line",
+          xAxisIndex: 0,
+          yAxisIndex: 9,
+          data: marketDownData,
+          showSymbol: false,
+          lineStyle: { color: "#d92d20", width: 1.8 },
           emphasis: { focus: "series" },
         },
         {
@@ -544,7 +595,7 @@ export default function MarketMicrostructureChart({
         },
       ],
     };
-  }, [buckets, marketEnd, marketStart, positionSeries, priceSeries, webSocketSummaries]);
+  }, [buckets, marketEnd, marketStart, polymarketProbabilities, positionSeries, priceSeries, webSocketSummaries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;

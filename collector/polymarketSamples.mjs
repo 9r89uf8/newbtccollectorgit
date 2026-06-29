@@ -7,7 +7,9 @@ import { fetchJson, postJson } from "./http.mjs";
 import { recordError } from "./store.mjs";
 
 const marketCache = new Map();
+const metadataPrefetchFailures = new Map();
 const SETTLEMENT_REFRESH_LIMIT = 12;
+const METADATA_PREFETCH_RETRY_MS = 10_000;
 
 function parseJsonish(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -349,6 +351,39 @@ async function loadStoredPolymarketMarket(market) {
 export async function refreshPolymarketMarketMetadata(market) {
   const parsed = await fetchGammaMarket(market);
   return upsertPolymarketMarket(parsed);
+}
+
+export async function prefetchPolymarketMarketMetadata(market, nowMs = Date.now()) {
+  const cached = marketCache.get(market.id);
+  if (cached?.upTokenId && cached?.downTokenId) {
+    return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.marketSource, marketId: market.id, cached: true };
+  }
+
+  const lastFailureMs = metadataPrefetchFailures.get(market.id) || 0;
+  if (nowMs - lastFailureMs < METADATA_PREFETCH_RETRY_MS) {
+    return { ok: false, source: POLYMARKET_5M_BTC_SOURCE.marketSource, marketId: market.id, skipped: true };
+  }
+
+  try {
+    const stored = await loadStoredPolymarketMarket(market);
+    if (stored?.upTokenId && stored?.downTokenId) {
+      metadataPrefetchFailures.delete(market.id);
+      return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.marketSource, marketId: market.id, stored: true };
+    }
+
+    const parsed = await fetchGammaMarket(market);
+    marketCache.set(market.id, parsed);
+    metadataPrefetchFailures.delete(market.id);
+    return {
+      ok: Boolean(parsed.upTokenId && parsed.downTokenId),
+      source: POLYMARKET_5M_BTC_SOURCE.marketSource,
+      marketId: market.id,
+      fetched: true,
+    };
+  } catch (error) {
+    metadataPrefetchFailures.set(market.id, nowMs);
+    return { ok: false, source: POLYMARKET_5M_BTC_SOURCE.marketSource, marketId: market.id, error };
+  }
 }
 
 async function ensurePolymarketMarket(market) {

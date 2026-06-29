@@ -7,6 +7,7 @@ import {
   ENABLE_POLYMARKET_BTC_5M,
   EXPECTED_POLYMARKET_PROBABILITY_SAMPLES_PER_MARKET,
   POLYMARKET_5M_BTC_SOURCE,
+  POLYMARKET_METADATA_PREFETCH_LEAD_MS,
   SYMBOL,
 } from "./config.mjs";
 import { collectFuturesAggregateTradesForMarket } from "./aggTrades.mjs";
@@ -29,6 +30,7 @@ import { writeMarketPositionFeatures } from "./marketPositionFeatures.mjs";
 import {
   collectPolymarketProbabilitySample,
   getPolymarketProbabilitySampleStats,
+  prefetchPolymarketMarketMetadata,
   refreshPolymarketMarketMetadata,
   refreshRecentPolymarketSettlements,
 } from "./polymarketSamples.mjs";
@@ -52,6 +54,7 @@ import {
 
 let stopping = false;
 let futuresWebSocketCollector = null;
+const pendingMarketClosures = new Map();
 
 async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {
   const nextScheduledMs = getNextScheduledMs(nowMs, market);
@@ -82,11 +85,70 @@ async function recordPolymarketRuntimeError(marketId, errorType, error, source) 
   });
 }
 
+function getNextMarketAfter(market) {
+  return getMarketWindow(new Date(market.endMs));
+}
+
+async function prefetchUpcomingPolymarketMetadata(market, nowMs = Date.now()) {
+  if (!ENABLE_POLYMARKET_BTC_5M) return;
+
+  const targets = [market];
+  const nextMarket = getNextMarketAfter(market);
+  if (nextMarket.startMs - nowMs <= POLYMARKET_METADATA_PREFETCH_LEAD_MS) {
+    targets.push(nextMarket);
+  }
+
+  await Promise.allSettled(
+    targets.map((target) => prefetchPolymarketMarketMetadata(target, nowMs))
+  );
+}
+
+async function collectNextMarketOpeningPolymarketSample(market, scheduledAt) {
+  if (!ENABLE_POLYMARKET_BTC_5M || scheduledAt.getTime() !== market.endMs) {
+    return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.probabilitySource, skipped: true };
+  }
+
+  const nextMarket = getNextMarketAfter(market);
+  await upsertMarket(nextMarket);
+  await prefetchPolymarketMarketMetadata(nextMarket, scheduledAt.getTime());
+  return collectPolymarketProbabilitySample(nextMarket, scheduledAt, "normal");
+}
+
+function scheduleMarketClose(market) {
+  const existing = pendingMarketClosures.get(market.id);
+  if (existing) return existing;
+
+  const closePromise = closeMarket(market)
+    .catch(async (error) => {
+      await recordError({
+        marketId: market.id,
+        source: COLLECTOR_NAME,
+        errorType: "market_close_error",
+        message: error.message || String(error),
+      });
+      await heartbeat(COLLECTOR_NAME, "error", market.id, error.message || String(error));
+    })
+    .finally(() => {
+      pendingMarketClosures.delete(market.id);
+    });
+
+  pendingMarketClosures.set(market.id, closePromise);
+  return closePromise;
+}
+
+async function waitForPendingMarketClosures() {
+  if (pendingMarketClosures.size === 0) return;
+  await Promise.allSettled([...pendingMarketClosures.values()]);
+}
+
 async function collectScheduledData(market, scheduledAt, sampleType) {
   const tasks = [collectPriceSamples(market, scheduledAt, sampleType)];
 
   if (ENABLE_POLYMARKET_BTC_5M) {
     tasks.push(collectPolymarketProbabilitySample(market, scheduledAt, sampleType));
+    if (sampleType === "close") {
+      tasks.push(collectNextMarketOpeningPolymarketSample(market, scheduledAt));
+    }
   }
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
@@ -223,10 +285,11 @@ export async function closeMarket(market) {
   );
 }
 
-async function closeDueMarkets() {
+async function closeDueMarkets({ waitForClose = true } = {}) {
   const markets = await getDueOpenMarkets();
-  for (const market of markets) {
-    await closeMarket(market);
+  const closePromises = markets.map((market) => scheduleMarketClose(market));
+  if (waitForClose) {
+    await Promise.allSettled(closePromises);
   }
 }
 
@@ -265,6 +328,11 @@ export async function runCollector() {
     await upsertMarket(market);
 
     const scheduledMs = getNextScheduledMs(Date.now(), market);
+    const prefetchWaitMs = Math.max(0, scheduledMs - Date.now());
+    if (prefetchWaitMs > 1500) {
+      await prefetchUpcomingPolymarketMetadata(market, Date.now());
+    }
+
     const waitMs = Math.max(0, scheduledMs - Date.now());
     if (waitMs > 0) await sleep(waitMs);
     if (stopping) break;
@@ -275,8 +343,8 @@ export async function runCollector() {
     await collectScheduledData(market, scheduledAt, sampleType);
 
     if (scheduledMs >= market.endMs) {
-      await closeMarket(market);
-      await closeDueMarkets();
+      scheduleMarketClose(market);
+      await closeDueMarkets({ waitForClose: false });
     }
   }
 }
@@ -292,6 +360,7 @@ export async function shutdown(signal) {
     }
     await heartbeat(COLLECTOR_NAME, "stopped", null, `stopped by ${signal}`);
   } finally {
+    await waitForPendingMarketClosures();
     await closePool();
   }
 }

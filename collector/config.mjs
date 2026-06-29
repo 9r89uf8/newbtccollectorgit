@@ -54,6 +54,10 @@ export const COLLECTOR_NAME = process.env.COLLECTOR_NAME || "btc-price-collector
 export const SYMBOL = process.env.COLLECTOR_SYMBOL || "BTCUSDT";
 export const REQUEST_TIMEOUT_MS = readPositiveNumber("BINANCE_TIMEOUT_MS", 4000);
 export const POLYMARKET_TIMEOUT_MS = readPositiveNumber("POLYMARKET_TIMEOUT_MS", REQUEST_TIMEOUT_MS);
+export const POLYMARKET_METADATA_PREFETCH_LEAD_MS = readPositiveNumber(
+  "POLYMARKET_METADATA_PREFETCH_LEAD_MS",
+  60_000
+);
 export const ENABLE_FUTURES_MICROSTRUCTURE = readBoolean(
   "ENABLE_FUTURES_MICROSTRUCTURE",
   true

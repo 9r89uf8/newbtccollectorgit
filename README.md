@@ -86,12 +86,15 @@ ENABLE_FUTURES_POSITIONING=true
 ENABLE_FUTURES_WEBSOCKET_SUMMARIES=true
 ENABLE_POLYMARKET_BTC_5M=true
 POLYMARKET_TIMEOUT_MS=4000
+POLYMARKET_METADATA_PREFETCH_LEAD_MS=60000
 FORWARD_LABEL_MIN_THRESHOLD_BPS=1
 LARGE_TRADE_QUOTE_THRESHOLD=1000000
 MAX_AGG_TRADE_PAGES_PER_MARKET=30
 ```
 
 Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector plus Polymarket, unless Polymarket is separately disabled. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed. Set `ENABLE_POLYMARKET_BTC_5M=false` to disable Polymarket probability collection.
+
+The collector prefetches Polymarket market metadata before the next 5 minute window starts, then records the next market opening CLOB midpoint sample at the prior market close boundary. `POLYMARKET_METADATA_PREFETCH_LEAD_MS` controls how early that metadata lookup starts.
 
 After the bucket schema exists, existing closed markets can be materialized with:
 

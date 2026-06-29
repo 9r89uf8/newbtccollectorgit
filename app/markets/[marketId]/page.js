@@ -61,6 +61,12 @@ function formatNumber(value) {
   return new Intl.NumberFormat("en-US").format(number);
 }
 
+function formatSeconds(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${number}s`;
+}
+
 function formatBps(value, digits = 2) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -80,7 +86,7 @@ function formatClassName(value) {
 
 function statusClass(status) {
   if (status === "running" || status === "closed" || status === "complete") return "status-good";
-  if (status === "open" || status === "partial") return "status-warn";
+  if (status === "open" || status === "partial" || status === "late_start") return "status-warn";
   if (status === "error" || status === "incomplete" || status === "missing") return "status-bad";
   return "status-muted";
 }
@@ -284,6 +290,81 @@ function averageNumeric(rows, field) {
     }
   }
   return count > 0 ? total / count : null;
+}
+
+function readFiniteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function polymarketCoverageQuality(coverage) {
+  if (!coverage) return "missing";
+
+  const expectedCount = readFiniteNumber(coverage.expected_count) || 0;
+  const sampleCount = readFiniteNumber(coverage.sample_count) || 0;
+  const completeCount = readFiniteNumber(coverage.complete_count) || 0;
+  const missingCount = readFiniteNumber(coverage.missing_count) || 0;
+  const partialCount = readFiniteNumber(coverage.partial_count) || 0;
+  const missingQualityCount = readFiniteNumber(coverage.missing_quality_count) || 0;
+  const firstLagSeconds = readFiniteNumber(coverage.first_sample_lag_seconds);
+
+  if (sampleCount === 0) return "missing";
+  if (firstLagSeconds !== null && firstLagSeconds > 0) return "late_start";
+  if (sampleCount < expectedCount || missingCount > 0 || partialCount > 0 || missingQualityCount > 0) return "partial";
+  return completeCount >= expectedCount ? "complete" : "partial";
+}
+
+function formatSampleRatio(sampleCount, expectedCount) {
+  const sample = readFiniteNumber(sampleCount);
+  const expected = readFiniteNumber(expectedCount);
+  if (sample === null || expected === null) return "-";
+  return `${formatNumber(sample)}/${formatNumber(expected)}`;
+}
+
+function PolymarketCoveragePanel({ coverage }) {
+  const quality = polymarketCoverageQuality(coverage);
+
+  return (
+    <section className="panel stats-panel detail-wide-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="panel-label">Polymarket timing</p>
+          <h2>Probability sample coverage</h2>
+        </div>
+        <span className={`status-pill ${statusClass(quality)}`}>{formatClassName(quality)}</span>
+      </div>
+      {!coverage ? (
+        <p className="muted">No Polymarket probability coverage row yet.</p>
+      ) : (
+        <div className="detail-feature-grid">
+          <div>
+            <span>Samples</span>
+            <strong>{formatSampleRatio(coverage.sample_count, coverage.expected_count)}</strong>
+          </div>
+          <div>
+            <span>Complete rows</span>
+            <strong>{formatNumber(coverage.complete_count)}</strong>
+          </div>
+          <div>
+            <span>Missing slots</span>
+            <strong>{formatNumber(coverage.missing_count)}</strong>
+          </div>
+          <div>
+            <span>Partial rows</span>
+            <strong>{formatNumber(coverage.partial_count)}</strong>
+          </div>
+          <div>
+            <span>First sample</span>
+            <strong>{formatUtc(coverage.first_sample_at)}</strong>
+          </div>
+          <div>
+            <span>First lag</span>
+            <strong>{formatSeconds(coverage.first_sample_lag_seconds)}</strong>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function WebSocketSummaryPanel({ summaries, forwardLabelStats }) {
@@ -679,6 +760,8 @@ export default async function MarketDetailPage({ params }) {
         <LabelTable labels={data.labels} />
         <FeatureSummary features={data.features} />
       </div>
+
+      <PolymarketCoveragePanel coverage={data.polymarketCoverage} />
 
       <section className="panel chart-panel detail-wide-panel">
         <div className="panel-heading">

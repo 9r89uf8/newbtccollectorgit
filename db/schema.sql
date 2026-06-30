@@ -499,6 +499,61 @@ create index if not exists market_cvd_buckets_source_time_idx
 create index if not exists market_cvd_buckets_symbol_source_time_idx
   on market_cvd_buckets (symbol, source, bucket_start desc);
 
+create table if not exists market_microprice_buckets (
+  market_id text not null references markets(id) on delete cascade,
+  source text not null,
+  symbol text not null,
+  bucket_start timestamptz not null,
+  bucket_end timestamptz not null,
+  bucket_seconds numeric(14, 3) not null default 1,
+  source_summary_quality text,
+  book_ticker_update_count integer not null default 0,
+  seconds_since_book_update numeric(14, 3),
+  best_bid_price numeric(20, 8),
+  best_bid_qty numeric(30, 12),
+  best_ask_price numeric(20, 8),
+  best_ask_qty numeric(30, 12),
+  mid_price numeric(20, 8),
+  spread_bps_close numeric(14, 8),
+  spread_bps_avg numeric(14, 8),
+  spread_bps_max numeric(14, 8),
+  microprice numeric(20, 8),
+  microprice_bps_from_mid numeric(14, 8),
+  microprice_lean numeric(14, 8),
+  microprice_delta numeric(14, 8) not null default 0,
+  microprice_pressure_market numeric(30, 8) not null default 0,
+  microprice_pressure_continuous numeric(30, 8) not null default 0,
+  avg_lean_10s numeric(14, 8),
+  avg_lean_30s numeric(14, 8),
+  up_lean_share_10s numeric(14, 8),
+  down_lean_share_10s numeric(14, 8),
+  up_lean_share_30s numeric(14, 8),
+  down_lean_share_30s numeric(14, 8),
+  valid_sample_count_10s integer not null default 0,
+  valid_sample_count_30s integer not null default 0,
+  spread_stable_10s boolean,
+  spread_stable_30s boolean,
+  mid_change_10s_bps numeric(14, 8),
+  mid_change_30s_bps numeric(14, 8),
+  price_stalled_10s boolean,
+  price_stalled_30s boolean,
+  lean_direction text,
+  persistence_signal text,
+  flip_signal text,
+  microprice_behavior text,
+  bucket_quality text not null check (bucket_quality in ('complete', 'partial', 'missing', 'stale')),
+  feature_version text not null default 'microprice_v1',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (market_id, source, bucket_start)
+);
+
+create index if not exists market_microprice_buckets_source_time_idx
+  on market_microprice_buckets (source, bucket_start desc);
+
+create index if not exists market_microprice_buckets_symbol_source_time_idx
+  on market_microprice_buckets (symbol, source, bucket_start desc);
+
 create table if not exists market_classifications (
   market_id text not null references markets(id) on delete cascade,
   source text not null,

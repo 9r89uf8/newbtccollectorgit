@@ -35,6 +35,11 @@ const HELP_TOPICS = [
     text: "Normalized aggressive flow: (taker buy quote - taker sell quote) / total taker quote. Values near +1 are buy-dominated; values near -1 are sell-dominated.",
   },
   {
+    id: "microprice",
+    label: "Microprice",
+    text: "Normalized top-of-book pressure from WebSocket best bid and ask size. Positive means bid size is heavier; negative means ask size is heavier. The pressure line accumulates valid lean through the market.",
+  },
+  {
     id: "bookImbalance",
     label: "Book imbalance",
     text: "Near-price liquidity balance inside 5 bps: (bid depth - ask depth) / (bid depth + ask depth). Positive means more bid liquidity; negative means more ask liquidity.",
@@ -93,6 +98,11 @@ function formatProbability(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return `${(number * 100).toFixed(1)}%`;
+}
+
+function formatClassName(value) {
+  if (!value) return "-";
+  return String(value).replaceAll("_", " ");
 }
 
 function formatBps(value) {
@@ -174,6 +184,14 @@ function buildTooltip(params) {
     return `<div style="padding-left:16px;color:#667085">${label}: <b>${formatter(value)}</b></div>`;
   }
 
+  function detailText(label, seriesName, valueIndex) {
+    const item = byName.get(seriesName);
+    if (!item) return "";
+    const value = item.value?.[valueIndex];
+    if (!value || value === "none") return "";
+    return `<div style="padding-left:16px;color:#667085">${label}: <b>${formatClassName(value)}</b></div>`;
+  }
+
   return `
     <div style="min-width:260px">
       <div style="font-weight:700;margin-bottom:6px">${formatUtc(time)}</div>
@@ -184,9 +202,15 @@ function buildTooltip(params) {
       ${detail("Event lag", "WS mid", 5, formatMilliseconds)}
       ${row("Net taker", "Net taker", formatCompactUsd, 2)}
       ${row("CVD", "CVD", formatCompactUsd, 2)}
+      ${row("Micro pressure", "Microprice pressure", (value) => formatDecimal(value, 2))}
+      ${detailText("Behavior", "Microprice pressure", 2)}
       ${row("Net liquidation", "Net liquidation", formatCompactUsd, 2)}
       ${row("Taker imbalance", "Taker imbalance", (value) => formatDecimal(value, 3))}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
+      ${row("Microprice lean", "Microprice lean", (value) => formatDecimal(value, 3))}
+      ${detail("Micro avg 10s", "Microprice lean", 2, (value) => formatDecimal(value, 3))}
+      ${detail("Micro avg 30s", "Microprice lean", 3, (value) => formatDecimal(value, 3))}
+      ${detailText("Micro signal", "Microprice lean", 4)}
       ${row("Spread", "Spread", formatBps)}
       ${row("WS spread", "WS spread", formatBps)}
       ${detail("WS spread max", "WS spread", 2, formatBps)}
@@ -205,6 +229,7 @@ export default function MarketMicrostructureChart({
   buckets,
   positionSeries = [],
   webSocketSummaries = [],
+  micropriceBuckets = [],
   polymarketProbabilities = [],
 }) {
   const chartRef = useRef(null);
@@ -245,6 +270,17 @@ export default function MarketMicrostructureChart({
         avgEventLagMs: finiteNumber(summary.avg_event_lag_ms),
       }))
       .filter((summary) => summary.time !== null);
+    const micropriceRows = micropriceBuckets
+      .map((bucket) => ({
+        time: toTimeValue(bucket.bucket_start),
+        lean: finiteNumber(bucket.microprice_lean),
+        avgLean10s: finiteNumber(bucket.avg_lean_10s),
+        avgLean30s: finiteNumber(bucket.avg_lean_30s),
+        pressureMarket: finiteNumber(bucket.microprice_pressure_market),
+        persistenceSignal: bucket.persistence_signal,
+        behavior: bucket.microprice_behavior,
+      }))
+      .filter((bucket) => bucket.time !== null);
     const polymarketRows = polymarketProbabilities
       .map((sample) => ({
         time: toTimeValue(sample.time),
@@ -297,6 +333,25 @@ export default function MarketMicrostructureChart({
         signedLogNetTaker(summary.netLiquidation),
         summary.netLiquidation,
       ]);
+    const micropriceLeanData = micropriceRows
+      .filter((bucket) => bucket.lean !== null)
+      .map((bucket) => [
+        bucket.time,
+        bucket.lean,
+        bucket.avgLean10s,
+        bucket.avgLean30s,
+        bucket.persistenceSignal,
+        bucket.behavior,
+      ]);
+    const micropriceAvg10Data = micropriceRows
+      .filter((bucket) => bucket.avgLean10s !== null)
+      .map((bucket) => [bucket.time, bucket.avgLean10s]);
+    const micropriceAvg30Data = micropriceRows
+      .filter((bucket) => bucket.avgLean30s !== null)
+      .map((bucket) => [bucket.time, bucket.avgLean30s]);
+    const micropricePressureData = micropriceRows
+      .filter((bucket) => bucket.pressureMarket !== null)
+      .map((bucket) => [bucket.time, bucket.pressureMarket, bucket.behavior]);
     const marketUpData = polymarketRows
       .filter((sample) => sample.upProbability !== null)
       .map((sample) => [sample.time, sample.upProbability]);
@@ -309,7 +364,7 @@ export default function MarketMicrostructureChart({
     return {
       animation: false,
       backgroundColor: "#fbfcfe",
-      color: ["#175cd3", "#344054", "#067647", "#c11574", "#7a5af8", "#16b364", "#b54708", "#f79009", "#667085", "#0e7490", "#c11574", "#475467"],
+      color: ["#175cd3", "#344054", "#067647", "#c11574", "#7a5af8", "#16b364", "#b54708", "#f79009", "#667085", "#0e7490", "#c11574", "#475467", "#155eef"],
       legend: {
         top: 6,
         left: 10,
@@ -383,6 +438,8 @@ export default function MarketMicrostructureChart({
           gridIndex: 2,
           min: -1,
           max: 1,
+          name: "imbalance",
+          nameTextStyle: { color: "#667085", fontSize: 11 },
           axisLabel: { color: "#667085", formatter: (value) => formatDecimal(value, 1) },
           splitLine: { lineStyle: { color: "#edf2f7" } },
         },
@@ -390,6 +447,8 @@ export default function MarketMicrostructureChart({
           type: "value",
           gridIndex: 2,
           position: "right",
+          name: "spread",
+          nameTextStyle: { color: "#b54708", fontSize: 11 },
           axisLabel: { color: "#b54708", formatter: formatBps },
           splitLine: { show: false },
         },
@@ -411,6 +470,16 @@ export default function MarketMicrostructureChart({
           name: "updates",
           nameTextStyle: { color: "#667085", fontSize: 11 },
           axisLabel: { color: "#667085", formatter: formatCount },
+          splitLine: { show: false },
+        },
+        {
+          type: "value",
+          gridIndex: 1,
+          position: "right",
+          scale: true,
+          name: "Micropressure",
+          nameTextStyle: { color: "#c11574", fontSize: 11 },
+          axisLabel: { color: "#c11574", formatter: (value) => formatDecimal(value, 1) },
           splitLine: { show: false },
         },
         {
@@ -484,7 +553,7 @@ export default function MarketMicrostructureChart({
           name: "Market Up",
           type: "line",
           xAxisIndex: 0,
-          yAxisIndex: 9,
+          yAxisIndex: 10,
           data: marketUpData,
           showSymbol: false,
           lineStyle: { color: "#039855", width: 1.8 },
@@ -494,7 +563,7 @@ export default function MarketMicrostructureChart({
           name: "Market Down",
           type: "line",
           xAxisIndex: 0,
-          yAxisIndex: 9,
+          yAxisIndex: 10,
           data: marketDownData,
           showSymbol: false,
           lineStyle: { color: "#d92d20", width: 1.8 },
@@ -530,6 +599,16 @@ export default function MarketMicrostructureChart({
           emphasis: { focus: "series" },
         },
         {
+          name: "Microprice pressure",
+          type: "line",
+          xAxisIndex: 1,
+          yAxisIndex: 6,
+          data: micropricePressureData,
+          showSymbol: false,
+          lineStyle: { color: "#c11574", width: 1.8 },
+          emphasis: { focus: "series" },
+        },
+        {
           name: "Net liquidation",
           type: "bar",
           xAxisIndex: 1,
@@ -558,6 +637,34 @@ export default function MarketMicrostructureChart({
           data: bookImbalanceData,
           showSymbol: false,
           lineStyle: { color: "#067647", width: 1.8 },
+        },
+        {
+          name: "Microprice lean",
+          type: "line",
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          data: micropriceLeanData,
+          showSymbol: false,
+          lineStyle: { color: "#c11574", width: 1.8 },
+          emphasis: { focus: "series" },
+        },
+        {
+          name: "Microprice 10s",
+          type: "line",
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          data: micropriceAvg10Data,
+          showSymbol: false,
+          lineStyle: { color: "#155eef", width: 1.35, type: "dashed" },
+        },
+        {
+          name: "Microprice 30s",
+          type: "line",
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          data: micropriceAvg30Data,
+          showSymbol: false,
+          lineStyle: { color: "#7a5af8", width: 1.35, type: "dotted" },
         },
         {
           name: "Spread",
@@ -590,7 +697,7 @@ export default function MarketMicrostructureChart({
           name: "Open interest",
           type: "line",
           xAxisIndex: 4,
-          yAxisIndex: 6,
+          yAxisIndex: 7,
           data: openInterestData,
           showSymbol: false,
           lineStyle: { color: "#0e7490", width: 1.8 },
@@ -599,7 +706,7 @@ export default function MarketMicrostructureChart({
           name: "Premium",
           type: "line",
           xAxisIndex: 4,
-          yAxisIndex: 7,
+          yAxisIndex: 8,
           data: premiumData,
           showSymbol: false,
           lineStyle: { color: "#c11574", width: 1.8 },
@@ -615,14 +722,14 @@ export default function MarketMicrostructureChart({
           name: "BTC on OI",
           type: "line",
           xAxisIndex: 4,
-          yAxisIndex: 8,
+          yAxisIndex: 9,
           data: priceData,
           showSymbol: false,
           lineStyle: { color: "#475467", width: 1.6, opacity: 0.82 },
         },
       ],
     };
-  }, [buckets, marketEnd, marketStart, polymarketProbabilities, positionSeries, priceSeries, webSocketSummaries]);
+  }, [buckets, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, webSocketSummaries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;

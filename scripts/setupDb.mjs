@@ -13,6 +13,7 @@ const hypertables = [
   { table: "polymarket_probability_samples", timeColumn: "scheduled_at" },
   { table: "futures_ws_1s_summaries", timeColumn: "bucket_start" },
   { table: "market_forward_labels", timeColumn: "bucket_start" },
+  { table: "market_microprice_buckets", timeColumn: "bucket_start" },
 ];
 
 async function enableTimescaleIfAvailable(client) {

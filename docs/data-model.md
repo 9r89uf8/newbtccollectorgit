@@ -357,6 +357,78 @@ max(1.0 bps, 2x current spread_bps)
 
 That keeps tiny quoted-market noise from being labeled as meaningful up/down movement. Complete labels require the future price row and enough 1-second path samples for the horizon.
 
+## Microprice Buckets
+
+Microprice buckets are derived from `futures_ws_1s_summaries`; they do not add a raw feed. For each 5 minute market the collector materializes one expected row per UTC second:
+
+```text
+300 rows per complete market
+bucket_start >= market.start_time
+bucket_start < market.end_time
+```
+
+Each row carries the latest recent valid WebSocket top-of-book state and marks whether the second had a direct book update, a carried-forward recent book, stale book state, or no usable book state.
+
+Core fields include:
+
+```text
+source_summary_quality
+book_ticker_update_count
+seconds_since_book_update
+mid_price
+spread_bps_close / avg / max
+microprice
+microprice_bps_from_mid
+microprice_lean
+microprice_delta
+microprice_pressure_market
+microprice_pressure_continuous
+avg_lean_10s / 30s
+up_lean_share_10s / 30s
+down_lean_share_10s / 30s
+valid_sample_count_10s / 30s
+spread_stable_10s / 30s
+mid_change_10s_bps / 30s_bps
+price_stalled_10s / 30s
+lean_direction
+persistence_signal
+flip_signal
+microprice_behavior
+bucket_quality
+```
+
+Normalized lean is:
+
+```text
+microprice_lean = 2 * microprice_bps_from_mid / spread_bps_close
+```
+
+With the current top-of-book formula this is equivalent to:
+
+```text
+(best_bid_qty - best_ask_qty) / (best_bid_qty + best_ask_qty)
+```
+
+Interpretation:
+
+```text
+positive = bid side heavier = upward top-of-book pressure
+negative = ask side heavier = downward top-of-book pressure
+```
+
+Bucket quality can be:
+
+| Quality | Meaning |
+| --- | --- |
+| `complete` | The second had a direct valid book-ticker summary. |
+| `partial` | The row uses a recent carried-forward valid book state. |
+| `stale` | The latest valid book state is older than the signal staleness threshold. |
+| `missing` | No usable book state was available. |
+
+Persistence labels require enough valid samples in the 10s or 30s rolling window, same-direction lean share of at least 70%, and stable spread. Stale and missing seconds do not contribute to `microprice_delta` or persistence counts.
+
+`microprice_pressure_market` resets at each 5 minute market. `microprice_pressure_continuous` keeps running across markets for the same symbol and WebSocket source. As with continuous CVD, backfilling older microprice buckets requires recomputing later continuous rows.
+
 ## Market Features
 
 After labels are written, the collector materializes one futures feature row per market in `market_features`.
@@ -538,6 +610,7 @@ Because futures aggregate trades are fetched after market close, this CVD is cur
 | `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
 | `market_cvd_buckets` | Stores per-timestamp cumulative volume delta derived from `market_feature_buckets`. |
+| `market_microprice_buckets` | Stores per-second top-of-book microprice pressure derived from `futures_ws_1s_summaries`. |
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
 | `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities at each pre-close sample timestamp. |

@@ -86,7 +86,7 @@ function formatClassName(value) {
 
 function statusClass(status) {
   if (status === "running" || status === "closed" || status === "complete") return "status-good";
-  if (status === "open" || status === "partial" || status === "late_start") return "status-warn";
+  if (status === "open" || status === "partial" || status === "late_start" || status === "stale") return "status-warn";
   if (status === "error" || status === "incomplete" || status === "missing") return "status-bad";
   return "status-muted";
 }
@@ -490,6 +490,99 @@ function WebSocketSummaryPanel({ summaries, forwardLabelStats }) {
     </details>
   );
 }
+function MicropriceBucketPanel({ buckets }) {
+  const completeCount = buckets.filter((bucket) => bucket.bucket_quality === "complete").length;
+  const partialCount = buckets.filter((bucket) => bucket.bucket_quality === "partial").length;
+  const staleCount = buckets.filter((bucket) => bucket.bucket_quality === "stale").length;
+  const missingCount = buckets.filter((bucket) => bucket.bucket_quality === "missing").length;
+  const latest = buckets.length > 0 ? buckets[buckets.length - 1] : null;
+
+  return (
+    <details className="panel table-panel detail-wide-panel collapsible-panel">
+      <summary className="panel-heading collapsible-panel-summary">
+        <div>
+          <p className="panel-label">Microprice buckets</p>
+          <h2>Top-of-book pressure</h2>
+        </div>
+        <div className="collapsible-panel-actions">
+          <span className="status-pill status-muted">{buckets.length} rows</span>
+          <span className="collapsible-toggle" aria-hidden="true">
+            <span className="collapsible-toggle-show">Show</span>
+            <span className="collapsible-toggle-hide">Hide</span>
+          </span>
+        </div>
+      </summary>
+
+      <div className="collapsible-panel-body">
+        <div className="detail-feature-grid">
+          <div>
+            <span>Complete</span>
+            <strong>{formatNumber(completeCount)}</strong>
+          </div>
+          <div>
+            <span>Partial</span>
+            <strong>{formatNumber(partialCount)}</strong>
+          </div>
+          <div>
+            <span>Stale</span>
+            <strong>{formatNumber(staleCount)}</strong>
+          </div>
+          <div>
+            <span>Missing</span>
+            <strong>{formatNumber(missingCount)}</strong>
+          </div>
+          <div>
+            <span>Final pressure</span>
+            <strong className={signedClass(latest?.microprice_pressure_market)}>{formatDecimal(latest?.microprice_pressure_market, 2)}</strong>
+          </div>
+          <div>
+            <span>Final 30s lean</span>
+            <strong className={signedClass(latest?.avg_lean_30s)}>{formatDecimal(latest?.avg_lean_30s)}</strong>
+          </div>
+        </div>
+
+        <div className="table-scroll">
+          <table className="bucket-detail-table">
+            <thead>
+              <tr>
+                <th>Second</th>
+                <th>Lean</th>
+                <th>Avg 10s</th>
+                <th>Avg 30s</th>
+                <th>Pressure</th>
+                <th>Signal</th>
+                <th>Behavior</th>
+                <th>Age</th>
+                <th>Quality</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.length === 0 ? (
+                <tr>
+                  <td colSpan="9" className="empty-cell">No microprice buckets for this market.</td>
+                </tr>
+              ) : (
+                buckets.map((bucket) => (
+                  <tr key={bucket.bucket_start}>
+                    <td>{formatUtc(bucket.bucket_start)}</td>
+                    <td className={signedClass(bucket.microprice_lean)}>{formatDecimal(bucket.microprice_lean)}</td>
+                    <td className={signedClass(bucket.avg_lean_10s)}>{formatDecimal(bucket.avg_lean_10s)}</td>
+                    <td className={signedClass(bucket.avg_lean_30s)}>{formatDecimal(bucket.avg_lean_30s)}</td>
+                    <td className={signedClass(bucket.microprice_pressure_market)}>{formatDecimal(bucket.microprice_pressure_market, 2)}</td>
+                    <td>{formatClassName(bucket.persistence_signal)}</td>
+                    <td>{formatClassName(bucket.microprice_behavior)}</td>
+                    <td>{formatSeconds(bucket.seconds_since_book_update)}</td>
+                    <td><span className={`status-pill ${statusClass(bucket.bucket_quality)}`}>{bucket.bucket_quality}</span></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  );
+}
 function BucketTable({ buckets }) {
   return (
     <details className="panel table-panel detail-wide-panel collapsible-panel">
@@ -728,6 +821,15 @@ export default async function MarketDetailPage({ params }) {
     microprice_bps_from_mid_close: toChartNumber(summary.microprice_bps_from_mid_close),
     avg_event_lag_ms: toChartNumber(summary.avg_event_lag_ms),
   }));
+  const chartMicropriceBuckets = data.micropriceBuckets.map((bucket) => ({
+    bucket_start: bucket.bucket_start instanceof Date ? bucket.bucket_start.toISOString() : bucket.bucket_start,
+    microprice_lean: toChartNumber(bucket.microprice_lean),
+    avg_lean_10s: toChartNumber(bucket.avg_lean_10s),
+    avg_lean_30s: toChartNumber(bucket.avg_lean_30s),
+    microprice_pressure_market: toChartNumber(bucket.microprice_pressure_market),
+    persistence_signal: bucket.persistence_signal,
+    microprice_behavior: bucket.microprice_behavior,
+  }));
   const chartPolymarketProbabilities = data.polymarketProbabilitySeries.map((sample) => ({
     time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
     up_probability: toChartNumber(sample.up_probability),
@@ -773,7 +875,7 @@ export default async function MarketDetailPage({ params }) {
         <div className="panel-heading">
           <div>
             <p className="panel-label">BTC futures price</p>
-            <h2>Price, CVD, taker flow, WebSocket liquidity, spread, and positioning</h2>
+            <h2>Price, CVD, taker flow, microprice, WebSocket liquidity, spread, and positioning</h2>
           </div>
           <span className="status-pill status-muted">{chartPriceSeries.length} samples</span>
         </div>
@@ -784,9 +886,12 @@ export default async function MarketDetailPage({ params }) {
           buckets={chartBuckets}
           positionSeries={chartPositionSeries}
           webSocketSummaries={chartWebSocketSummaries}
+          micropriceBuckets={chartMicropriceBuckets}
           polymarketProbabilities={chartPolymarketProbabilities}
         />
       </section>
+
+      <MicropriceBucketPanel buckets={data.micropriceBuckets} />
 
       <WebSocketSummaryPanel
         summaries={data.webSocketSummaries}

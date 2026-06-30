@@ -515,6 +515,8 @@ function BucketTable({ buckets }) {
               <th>Window</th>
               <th>Move</th>
               <th>Net taker</th>
+              <th>CVD</th>
+              <th>5b signal</th>
               <th>Taker imb.</th>
               <th>Book imb.</th>
               <th>Spread</th>
@@ -527,7 +529,7 @@ function BucketTable({ buckets }) {
           <tbody>
             {buckets.length === 0 ? (
               <tr>
-                <td colSpan="11" className="empty-cell">No timestamp buckets for this market.</td>
+                <td colSpan="13" className="empty-cell">No timestamp buckets for this market.</td>
               </tr>
             ) : (
               buckets.map((bucket) => (
@@ -536,6 +538,8 @@ function BucketTable({ buckets }) {
                   <td>{Number(bucket.bucket_seconds).toFixed(0)}s</td>
                   <td className={directionClass(bucket.direction)}>{formatPct(bucket.return_pct)}</td>
                   <td className={signedClass(bucket.net_taker_quote)}>{formatCompactUsd(bucket.net_taker_quote)}</td>
+                  <td className={signedClass(bucket.cvd_market_quote)}>{formatCompactUsd(bucket.cvd_market_quote)}</td>
+                  <td>{formatClassName(bucket.cvd_divergence_5b)}</td>
                   <td className={signedClass(bucket.taker_imbalance)}>{formatDecimal(bucket.taker_imbalance)}</td>
                   <td className={signedClass(bucket.book_imbalance_5bps)}>{formatDecimal(bucket.book_imbalance_5bps)}</td>
                   <td>{formatDecimal(bucket.spread_bps, 2)}</td>
@@ -693,12 +697,18 @@ export default async function MarketDetailPage({ params }) {
     time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
     price: Number(sample.price),
   }));
+  const toChartNumber = (value) => {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
   const chartBuckets = data.buckets.map((bucket) => ({
     bucket_start: bucket.bucket_start instanceof Date ? bucket.bucket_start.toISOString() : bucket.bucket_start,
-    net_taker_quote: Number(bucket.net_taker_quote),
-    taker_imbalance: Number(bucket.taker_imbalance),
-    book_imbalance_5bps: Number(bucket.book_imbalance_5bps),
-    spread_bps: Number(bucket.spread_bps),
+    net_taker_quote: toChartNumber(bucket.net_taker_quote),
+    cvd_market_quote: toChartNumber(bucket.cvd_market_quote),
+    taker_imbalance: toChartNumber(bucket.taker_imbalance),
+    book_imbalance_5bps: toChartNumber(bucket.book_imbalance_5bps),
+    spread_bps: toChartNumber(bucket.spread_bps),
   }));
   const chartPositionSeries = data.positionSeries.map((sample) => ({
     time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
@@ -706,11 +716,7 @@ export default async function MarketDetailPage({ params }) {
     premium_bps: Number(sample.premium_bps),
     funding_rate: Number(sample.funding_rate),
   }));
-  const toChartNumber = (value) => {
-    if (value === null || value === undefined || value === "") return null;
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
-  };
+
   const chartWebSocketSummaries = data.webSocketSummaries.map((summary) => ({
     bucket_start: summary.bucket_start instanceof Date ? summary.bucket_start.toISOString() : summary.bucket_start,
     mid_price_close: toChartNumber(summary.mid_price_close),
@@ -767,7 +773,7 @@ export default async function MarketDetailPage({ params }) {
         <div className="panel-heading">
           <div>
             <p className="panel-label">BTC futures price</p>
-            <h2>Price, taker flow, WebSocket liquidity, spread, and positioning</h2>
+            <h2>Price, CVD, taker flow, WebSocket liquidity, spread, and positioning</h2>
           </div>
           <span className="status-pill status-muted">{chartPriceSeries.length} samples</span>
         </div>

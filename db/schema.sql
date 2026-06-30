@@ -465,6 +465,40 @@ create index if not exists market_feature_buckets_source_time_idx
 create index if not exists market_feature_buckets_symbol_source_time_idx
   on market_feature_buckets (symbol, source, bucket_start desc);
 
+create table if not exists market_cvd_buckets (
+  market_id text not null references markets(id) on delete cascade,
+  source text not null,
+  symbol text not null,
+  bucket_start timestamptz not null,
+  bucket_end timestamptz not null,
+  bucket_seconds numeric(14, 3) not null,
+  open_price numeric(20, 8),
+  close_price numeric(20, 8),
+  return_pct numeric(14, 8),
+  return_bps numeric(14, 8),
+  taker_buy_quote numeric(30, 8) not null default 0,
+  taker_sell_quote numeric(30, 8) not null default 0,
+  delta_quote numeric(30, 8) not null default 0,
+  cvd_market_quote numeric(30, 8) not null default 0,
+  cvd_continuous_quote numeric(30, 8) not null default 0,
+  cvd_change_5b numeric(30, 8),
+  price_change_5b_bps numeric(14, 8),
+  cvd_direction text,
+  price_direction text,
+  cvd_price_behavior text,
+  cvd_divergence_5b text,
+  bucket_quality text not null check (bucket_quality in ('complete', 'partial', 'missing')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (market_id, source, bucket_start)
+);
+
+create index if not exists market_cvd_buckets_source_time_idx
+  on market_cvd_buckets (source, bucket_start desc);
+
+create index if not exists market_cvd_buckets_symbol_source_time_idx
+  on market_cvd_buckets (symbol, source, bucket_start desc);
+
 create table if not exists market_classifications (
   market_id text not null references markets(id) on delete cascade,
   source text not null,

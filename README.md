@@ -75,6 +75,7 @@ The collector records the original spot/futures last-price samples and, by defau
 - One derived `market_behavior_labels` row per closed market
 - One derived `market_classifications` row per closed market
 - Per-timestamp `market_feature_buckets` rows inside each market
+- Per-timestamp `market_cvd_buckets` rows for cumulative volume delta
 - Forward outcome labels for 1s, 5s, 10s, 15s, 30s, and 60s horizons
 - Polymarket 5 minute BTC Up/Down market metadata and CLOB midpoint probabilities
 
@@ -100,6 +101,7 @@ After the bucket schema exists, existing closed markets can be materialized with
 
 ```bash
 npm run features:backfill-buckets -- 288
+npm run features:backfill-cvd -- 288
 ```
 
 ## Data model
@@ -120,6 +122,7 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `market_behavior_labels`
 - `market_classifications`
 - `market_feature_buckets`
+- `market_cvd_buckets`
 - `market_forward_labels`
 - `polymarket_5m_btc_markets`
 - `polymarket_probability_samples`

@@ -488,6 +488,39 @@ ask_depth_5bps
 
 The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_samples`. Keep the raw tables because bucket logic can be recomputed later if the analysis window or feature definitions change.
 
+## Cumulative Volume Delta Buckets
+
+After `market_feature_buckets` is written, the collector derives one `market_cvd_buckets` row for each timestamp bucket. This table does not add a raw feed; it uses the existing bucket trade-flow delta:
+
+```text
+delta_quote = market_feature_buckets.net_taker_quote
+            = taker_buy_quote - taker_sell_quote
+```
+
+CVD continuously adds that signed delta into a running total:
+
+```text
+cvd = previous_cvd + delta_quote
+```
+
+Each CVD bucket stores:
+
+```text
+delta_quote
+cvd_market_quote
+cvd_continuous_quote
+cvd_change_5b
+price_change_5b_bps
+cvd_direction
+price_direction
+cvd_price_behavior
+cvd_divergence_5b
+```
+
+`cvd_market_quote` resets at the start of each 5 minute market. `cvd_continuous_quote` keeps running across markets for the same symbol and source. When an older bucket is backfilled or recomputed, later continuous CVD rows should be recomputed because they depend on the changed delta history.
+
+Because futures aggregate trades are fetched after market close, this CVD is currently a post-market derived feature. A live CVD chart would require adding a Binance Futures trade stream such as aggTrade/trade.
+
 ## Main Tables
 
 | Table | Purpose |
@@ -504,6 +537,7 @@ The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_sa
 | `market_behavior_labels` | Stores richer per-market futures behavior labels derived from existing samples and trades. |
 | `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
+| `market_cvd_buckets` | Stores per-timestamp cumulative volume delta derived from `market_feature_buckets`. |
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
 | `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities at each pre-close sample timestamp. |

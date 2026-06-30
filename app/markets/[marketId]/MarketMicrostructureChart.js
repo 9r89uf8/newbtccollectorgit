@@ -20,6 +20,11 @@ const HELP_TOPICS = [
     text: "Aggressive buy dollars minus aggressive sell dollars. Positive means market buyers hit asks more than market sellers hit bids, which often supports upward pressure. Negative means sellers were more aggressive, which often pressures price down. Tooltips show raw dollars.",
   },
   {
+    id: "cvd",
+    label: "CVD",
+    text: "Cumulative volume delta is the running sum of net taker dollars. Rising CVD means aggressive buyers are dominating over the plotted window; falling CVD means aggressive sellers are dominating.",
+  },
+  {
     id: "netLiquidation",
     label: "Net liq",
     text: "One-second liquidation notional from the WebSocket force-order stream. Positive means buy liquidation notional exceeded sell liquidation notional; negative means sell liquidations dominated.",
@@ -178,6 +183,7 @@ function buildTooltip(params) {
       ${detail("Microprice dev", "WS mid", 4, formatBps)}
       ${detail("Event lag", "WS mid", 5, formatMilliseconds)}
       ${row("Net taker", "Net taker", formatCompactUsd, 2)}
+      ${row("CVD", "CVD", formatCompactUsd, 2)}
       ${row("Net liquidation", "Net liquidation", formatCompactUsd, 2)}
       ${row("Taker imbalance", "Taker imbalance", (value) => formatDecimal(value, 3))}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
@@ -213,6 +219,7 @@ export default function MarketMicrostructureChart({
       .map((bucket) => ({
         time: toTimeValue(bucket.bucket_start),
         netTaker: finiteNumber(bucket.net_taker_quote),
+        cvdMarket: finiteNumber(bucket.cvd_market_quote),
         takerImbalance: finiteNumber(bucket.taker_imbalance),
         bookImbalance: finiteNumber(bucket.book_imbalance_5bps),
         spread: finiteNumber(bucket.spread_bps),
@@ -249,6 +256,9 @@ export default function MarketMicrostructureChart({
     const netTakerData = bucketRows
       .filter((bucket) => bucket.netTaker !== null)
       .map((bucket) => [bucket.time, signedLogNetTaker(bucket.netTaker), bucket.netTaker]);
+    const cvdData = bucketRows
+      .filter((bucket) => bucket.cvdMarket !== null)
+      .map((bucket) => [bucket.time, signedLogNetTaker(bucket.cvdMarket), bucket.cvdMarket]);
     const takerImbalanceData = bucketRows
       .filter((bucket) => bucket.takerImbalance !== null)
       .map((bucket) => [bucket.time, bucket.takerImbalance]);
@@ -360,7 +370,7 @@ export default function MarketMicrostructureChart({
         {
           type: "value",
           gridIndex: 1,
-          name: "signed log scale",
+          name: "flow / CVD",
           nameTextStyle: { color: "#667085", fontSize: 11 },
           axisLabel: {
             color: "#667085",
@@ -501,6 +511,23 @@ export default function MarketMicrostructureChart({
             color: (params) => (Number(params.value?.[2]) >= 0 ? "#067647" : "#b42318"),
             opacity: 0.82,
           },
+        },
+        {
+          name: "CVD",
+          type: "line",
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: cvdData,
+          showSymbol: false,
+          lineStyle: { color: "#175cd3", width: 2 },
+          markLine: {
+            symbol: "none",
+            silent: true,
+            label: { show: false },
+            lineStyle: { color: "#98a2b3", type: "dashed", width: 1 },
+            data: [{ yAxis: 0 }],
+          },
+          emphasis: { focus: "series" },
         },
         {
           name: "Net liquidation",

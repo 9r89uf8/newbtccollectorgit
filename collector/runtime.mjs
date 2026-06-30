@@ -23,6 +23,7 @@ import {
 import { startFuturesWebSocketSummaryCollector } from "./futuresWebSocketSummaries.mjs";
 import { writeMarketBehaviorLabel } from "./marketBehaviorLabels.mjs";
 import { writeMarketClassification } from "./marketClassifications.mjs";
+import { writeMarketCvdBuckets } from "./marketCvdBuckets.mjs";
 import { writeMarketFeatureBuckets } from "./marketFeatureBuckets.mjs";
 import { writeMarketFeatures } from "./marketFeatures.mjs";
 import { writeMarketLabels } from "./marketLabels.mjs";
@@ -181,6 +182,7 @@ async function collectScheduledData(market, scheduledAt, sampleType) {
 export async function closeMarket(market) {
   let featureResult = null;
   let bucketResult = null;
+  let cvdBucketResult = null;
   let positionResult = null;
   let behaviorResult = null;
   let classificationResult = null;
@@ -222,6 +224,7 @@ export async function closeMarket(market) {
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
     featureResult = await writeMarketFeatures(market);
     bucketResult = await writeMarketFeatureBuckets(market);
+    cvdBucketResult = await writeMarketCvdBuckets(market);
     behaviorResult = await writeMarketBehaviorLabel(market);
     if (ENABLE_FUTURES_POSITIONING) {
       positionResult = await writeMarketPositionFeatures(market);
@@ -241,6 +244,9 @@ export async function closeMarket(market) {
     : "";
   const bucketMessage = bucketResult
     ? `; buckets ${bucketResult.bucketCount}`
+    : "";
+  const cvdBucketMessage = cvdBucketResult
+    ? `; cvd ${cvdBucketResult.cvdBucketCount}`
     : "";
   const positionMessage = positionResult ? `; positioning ${positionResult.position_quality}` : "";
   const behaviorMessage = behaviorResult ? `; behavior ${behaviorResult.shape_class}` : "";
@@ -281,7 +287,7 @@ export async function closeMarket(market) {
     COLLECTOR_NAME,
     "running",
     market.id,
-    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${polymarketMessage}${forwardRefreshMessage}${polymarketRefreshMessage}${incompleteMarkerMessage}`
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${cvdBucketMessage}${positionMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${polymarketMessage}${forwardRefreshMessage}${polymarketRefreshMessage}${incompleteMarkerMessage}`
   );
 }
 

@@ -11,6 +11,7 @@
     "db:setup": "node scripts/setupDb.mjs",
     "db:clear-data": "node scripts/clearData.mjs",
     "features:backfill-buckets": "node scripts/backfillFeatureBuckets.mjs",
+    "features:backfill-cvd": "node scripts/backfillCvdBuckets.mjs",
     "labels:reconcile": "node scripts/reconcileMarketLabels.mjs"
   },
   "dependencies": {

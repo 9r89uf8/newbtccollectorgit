@@ -22,7 +22,14 @@ const HELP_TOPICS = [
   {
     id: "cvd",
     label: "CVD",
-    text: "Cumulative volume delta is the running sum of net taker dollars. Rising CVD means aggressive buyers are dominating over the plotted window; falling CVD means aggressive sellers are dominating.",
+    text: "Cumulative volume delta is the running sum of aggressive buyer dollars minus aggressive seller dollars. Direction matters, but the better read is divergence: did aggressive flow actually move BTC price, or was it absorbed?",
+    details: [
+      "CVD rising + price rising: buyers are in control because aggressive buying is moving price up.",
+      "CVD rising + price flat: sellers are absorbing the aggressive buys, so the buying may be less bullish than it looks.",
+      "CVD falling + price flat: buyers are absorbing aggressive sells, which can be a support or reversal clue.",
+      "CVD falling + price falling: sellers are in control because aggressive selling is moving price down.",
+      "A useful chart read is CVD direction versus price response, not CVD direction alone.",
+    ],
   },
   {
     id: "netLiquidation",
@@ -37,7 +44,13 @@ const HELP_TOPICS = [
   {
     id: "microprice",
     label: "Microprice",
-    text: "Normalized top-of-book pressure from WebSocket best bid and ask size. Positive means bid size is heavier; negative means ask size is heavier. The pressure line accumulates valid lean through the market.",
+    text: "Microprice is the order book's center of gravity: (best ask * bid size + best bid * ask size) / (bid size + ask size). If bid size is heavier, microprice leans above the midprice toward the ask, which points to short-term upward pressure. If ask size is heavier, it leans below the midprice toward the bid, which points to short-term downward pressure.",
+    details: [
+      "The visible microprice lines are rolling average lean, not the raw one-second lean. The raw one-second lean can whip from +1 to -1 quickly, so the chart hides it and focuses on persistence.",
+      "Microprice 10s is the average normalized lean over the last 10 valid seconds. It reacts faster and is useful for short bursts of book pressure.",
+      "Microprice 30s is the average normalized lean over the last 30 valid seconds. It is slower but usually more useful because it filters noise and shows persistent pressure.",
+      "Both visible lines stay on the -1 to +1 lean scale: above 0 = upward book pressure, below 0 = downward book pressure, near 0 = balanced. The separate pressure line can reach +30 or -70 because it accumulates one-second lean over time.",
+    ],
   },
   {
     id: "bookImbalance",
@@ -57,7 +70,12 @@ const HELP_TOPICS = [
   {
     id: "openInterest",
     label: "Open interest",
-    text: "Total open BTC futures exposure, shown in dollars. Rising open interest means new leverage is entering; falling open interest means positions are closing. Rising OI with price usually supports trend continuation; falling OI during a sharp move often means squeeze or deleveraging.",
+    text: "Total open BTC futures exposure. The chart plots open-interest change from the first sample in the market, so small intramarket moves are visible even when absolute OI is around several billion dollars.",
+    details: [
+      "The left axis is OI change: +$2M means open interest is about $2M above the market's first OI sample; -$2M means about $2M below it.",
+      "The tooltip still shows the absolute open-interest value, plus the change from the first sample.",
+      "Rising OI means new leverage is entering; falling OI means positions are closing. Rising OI with price can support continuation, while falling OI during a sharp move often points to squeeze or deleveraging.",
+    ],
   },
   {
     id: "premium",
@@ -77,6 +95,25 @@ function formatCompactUsd(value) {
   }).format(number);
 }
 
+function formatSignedCompactUsd(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  const formatted = formatCompactUsd(Math.abs(number));
+  if (number > 0) return `+${formatted}`;
+  if (number < 0) return `-${formatted}`;
+  return formatted;
+}
+
+function formatOpenInterestUsd(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  const abs = Math.abs(number);
+  const sign = number < 0 ? "-$" : "$";
+  if (abs >= 1_000_000_000) return `${sign}${(abs / 1_000_000_000).toFixed(4)}B`;
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(2)}M`;
+  return formatCompactUsd(number);
+}
+
 function formatPrice(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -93,6 +130,7 @@ function formatDecimal(value, digits = 3) {
   if (!Number.isFinite(number)) return "-";
   return `${number >= 0 ? "+" : ""}${number.toFixed(digits)}`;
 }
+
 
 function formatProbability(value) {
   const number = Number(value);
@@ -202,20 +240,20 @@ function buildTooltip(params) {
       ${detail("Event lag", "WS mid", 5, formatMilliseconds)}
       ${row("Net taker", "Net taker", formatCompactUsd, 2)}
       ${row("CVD", "CVD", formatCompactUsd, 2)}
-      ${row("Micro pressure", "Microprice pressure", (value) => formatDecimal(value, 2))}
+      ${row("Pressure sum", "Microprice pressure", (value) => formatDecimal(value, 1))}
       ${detailText("Behavior", "Microprice pressure", 2)}
       ${row("Net liquidation", "Net liquidation", formatCompactUsd, 2)}
       ${row("Taker imbalance", "Taker imbalance", (value) => formatDecimal(value, 3))}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
-      ${row("Microprice lean", "Microprice lean", (value) => formatDecimal(value, 3))}
-      ${detail("Micro avg 10s", "Microprice lean", 2, (value) => formatDecimal(value, 3))}
-      ${detail("Micro avg 30s", "Microprice lean", 3, (value) => formatDecimal(value, 3))}
-      ${detailText("Micro signal", "Microprice lean", 4)}
+      ${row("Microprice 10s", "Microprice 10s", (value) => formatDecimal(value, 3))}
+      ${row("Microprice 30s", "Microprice 30s", (value) => formatDecimal(value, 3))}
+      ${detailText("Micro signal", "Microprice 30s", 2)}
       ${row("Spread", "Spread", formatBps)}
       ${row("WS spread", "WS spread", formatBps)}
       ${detail("WS spread max", "WS spread", 2, formatBps)}
       ${row("Book updates", "Book updates", formatCount)}
-      ${row("Open interest", "Open interest", formatCompactUsd)}
+      ${row("Open interest", "Open interest", formatOpenInterestUsd, 2)}
+      ${detail("OI change", "Open interest", 1, formatSignedCompactUsd)}
       ${row("Premium", "Premium", formatBps)}
       ${row("BTC on OI", "BTC on OI", formatPrice)}
     </div>
@@ -304,9 +342,14 @@ export default function MarketMicrostructureChart({
     const spreadData = bucketRows
       .filter((bucket) => bucket.spread !== null)
       .map((bucket) => [bucket.time, bucket.spread]);
+    const openInterestBase = positionRows.find((sample) => sample.openInterestQuote !== null)?.openInterestQuote ?? null;
     const openInterestData = positionRows
       .filter((sample) => sample.openInterestQuote !== null)
-      .map((sample) => [sample.time, sample.openInterestQuote]);
+      .map((sample) => [
+        sample.time,
+        openInterestBase === null ? 0 : sample.openInterestQuote - openInterestBase,
+        sample.openInterestQuote,
+      ]);
     const premiumData = positionRows
       .filter((sample) => sample.premiumBps !== null)
       .map((sample) => [sample.time, sample.premiumBps]);
@@ -333,22 +376,12 @@ export default function MarketMicrostructureChart({
         signedLogNetTaker(summary.netLiquidation),
         summary.netLiquidation,
       ]);
-    const micropriceLeanData = micropriceRows
-      .filter((bucket) => bucket.lean !== null)
-      .map((bucket) => [
-        bucket.time,
-        bucket.lean,
-        bucket.avgLean10s,
-        bucket.avgLean30s,
-        bucket.persistenceSignal,
-        bucket.behavior,
-      ]);
     const micropriceAvg10Data = micropriceRows
       .filter((bucket) => bucket.avgLean10s !== null)
-      .map((bucket) => [bucket.time, bucket.avgLean10s]);
+      .map((bucket) => [bucket.time, bucket.avgLean10s, bucket.persistenceSignal]);
     const micropriceAvg30Data = micropriceRows
       .filter((bucket) => bucket.avgLean30s !== null)
-      .map((bucket) => [bucket.time, bucket.avgLean30s]);
+      .map((bucket) => [bucket.time, bucket.avgLean30s, bucket.persistenceSignal]);
     const micropricePressureData = micropriceRows
       .filter((bucket) => bucket.pressureMarket !== null)
       .map((bucket) => [bucket.time, bucket.pressureMarket, bucket.behavior]);
@@ -380,10 +413,10 @@ export default function MarketMicrostructureChart({
         formatter: buildTooltip,
       },
       dataZoom: [
-        { type: "inside", xAxisIndex: [0, 1, 2, 3, 4], filterMode: "none" },
+        { type: "inside", xAxisIndex: [0, 1, 2, 3, 4, 5], filterMode: "none" },
         {
           type: "slider",
-          xAxisIndex: [0, 1, 2, 3, 4],
+          xAxisIndex: [0, 1, 2, 3, 4, 5],
           filterMode: "none",
           bottom: 10,
           height: 22,
@@ -395,13 +428,14 @@ export default function MarketMicrostructureChart({
       axisPointer: { link: [{ xAxisIndex: "all" }] },
 
       grid: [
-        { left: 78, right: 132, top: 58, height: 175 },
-        { left: 78, right: 132, top: 310, height: 115 },
-        { left: 78, right: 132, top: 505, height: 120 },
-        { left: 78, right: 132, top: 705, height: 120 },
-        { left: 78, right: 132, top: 905, height: 185 },
+        { left: 78, right: 132, top: 58, height: 165 },
+        { left: 78, right: 132, top: 290, height: 105 },
+        { left: 78, right: 132, top: 455, height: 105 },
+        { left: 78, right: 132, top: 620, height: 110 },
+        { left: 78, right: 132, top: 790, height: 110 },
+        { left: 78, right: 132, top: 960, height: 190 },
       ],
-      xAxis: [0, 1, 2, 3, 4].map((gridIndex) => ({
+      xAxis: [0, 1, 2, 3, 4, 5].map((gridIndex) => ({
         type: "time",
         gridIndex,
         min: start || undefined,
@@ -438,6 +472,16 @@ export default function MarketMicrostructureChart({
           gridIndex: 2,
           min: -1,
           max: 1,
+          name: "avg lean",
+          nameTextStyle: { color: "#c11574", fontSize: 11 },
+          axisLabel: { color: "#c11574", formatter: (value) => formatDecimal(value, 1) },
+          splitLine: { lineStyle: { color: "#edf2f7" } },
+        },
+        {
+          type: "value",
+          gridIndex: 3,
+          min: -1,
+          max: 1,
           name: "imbalance",
           nameTextStyle: { color: "#667085", fontSize: 11 },
           axisLabel: { color: "#667085", formatter: (value) => formatDecimal(value, 1) },
@@ -445,7 +489,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 2,
+          gridIndex: 3,
           position: "right",
           name: "spread",
           nameTextStyle: { color: "#b54708", fontSize: 11 },
@@ -454,7 +498,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 3,
+          gridIndex: 4,
           scale: true,
           name: "WS spread",
           nameTextStyle: { color: "#f79009", fontSize: 11 },
@@ -463,7 +507,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 3,
+          gridIndex: 4,
           position: "right",
           min: 0,
           scale: true,
@@ -484,16 +528,18 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 4,
+          gridIndex: 5,
           scale: true,
-          name: "Open interest",
+          min: (value) => Math.min(value.min, 0),
+          max: (value) => Math.max(value.max, 0),
+          name: "OI change",
           nameTextStyle: { color: "#0e7490", fontSize: 11 },
-          axisLabel: { color: "#0e7490", formatter: formatCompactUsd },
+          axisLabel: { color: "#0e7490", formatter: formatSignedCompactUsd },
           splitLine: { lineStyle: { color: "#edf2f7" } },
         },
         {
           type: "value",
-          gridIndex: 4,
+          gridIndex: 5,
           position: "right",
           scale: true,
           min: (value) => Math.min(value.min, 0),
@@ -506,7 +552,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 4,
+          gridIndex: 5,
           position: "right",
           offset: 68,
           scale: true,
@@ -553,7 +599,7 @@ export default function MarketMicrostructureChart({
           name: "Market Up",
           type: "line",
           xAxisIndex: 0,
-          yAxisIndex: 10,
+          yAxisIndex: 11,
           data: marketUpData,
           showSymbol: false,
           lineStyle: { color: "#039855", width: 1.8 },
@@ -563,7 +609,7 @@ export default function MarketMicrostructureChart({
           name: "Market Down",
           type: "line",
           xAxisIndex: 0,
-          yAxisIndex: 10,
+          yAxisIndex: 11,
           data: marketDownData,
           showSymbol: false,
           lineStyle: { color: "#d92d20", width: 1.8 },
@@ -602,7 +648,7 @@ export default function MarketMicrostructureChart({
           name: "Microprice pressure",
           type: "line",
           xAxisIndex: 1,
-          yAxisIndex: 6,
+          yAxisIndex: 7,
           data: micropricePressureData,
           showSymbol: false,
           lineStyle: { color: "#c11574", width: 1.8 },
@@ -623,8 +669,8 @@ export default function MarketMicrostructureChart({
         {
           name: "Taker imbalance",
           type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 2,
+          xAxisIndex: 3,
+          yAxisIndex: 3,
           data: takerImbalanceData,
           showSymbol: false,
           lineStyle: { color: "#7a5af8", width: 1.8 },
@@ -632,22 +678,13 @@ export default function MarketMicrostructureChart({
         {
           name: "Book imbalance",
           type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 2,
+          xAxisIndex: 3,
+          yAxisIndex: 3,
           data: bookImbalanceData,
           showSymbol: false,
           lineStyle: { color: "#067647", width: 1.8 },
         },
-        {
-          name: "Microprice lean",
-          type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 2,
-          data: micropriceLeanData,
-          showSymbol: false,
-          lineStyle: { color: "#c11574", width: 1.8 },
-          emphasis: { focus: "series" },
-        },
+
         {
           name: "Microprice 10s",
           type: "line",
@@ -669,8 +706,8 @@ export default function MarketMicrostructureChart({
         {
           name: "Spread",
           type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 3,
+          xAxisIndex: 3,
+          yAxisIndex: 4,
           data: spreadData,
           showSymbol: false,
           lineStyle: { color: "#b54708", width: 1.5, type: "dashed" },
@@ -678,8 +715,8 @@ export default function MarketMicrostructureChart({
         {
           name: "WS spread",
           type: "line",
-          xAxisIndex: 3,
-          yAxisIndex: 4,
+          xAxisIndex: 4,
+          yAxisIndex: 5,
           data: wsSpreadData,
           showSymbol: false,
           lineStyle: { color: "#f79009", width: 1.8 },
@@ -687,8 +724,8 @@ export default function MarketMicrostructureChart({
         {
           name: "Book updates",
           type: "bar",
-          xAxisIndex: 3,
-          yAxisIndex: 5,
+          xAxisIndex: 4,
+          yAxisIndex: 6,
           data: bookUpdateData,
           barMaxWidth: 4,
           itemStyle: { color: "#667085", opacity: 0.34 },
@@ -696,8 +733,8 @@ export default function MarketMicrostructureChart({
         {
           name: "Open interest",
           type: "line",
-          xAxisIndex: 4,
-          yAxisIndex: 7,
+          xAxisIndex: 5,
+          yAxisIndex: 8,
           data: openInterestData,
           showSymbol: false,
           lineStyle: { color: "#0e7490", width: 1.8 },
@@ -705,8 +742,8 @@ export default function MarketMicrostructureChart({
         {
           name: "Premium",
           type: "line",
-          xAxisIndex: 4,
-          yAxisIndex: 8,
+          xAxisIndex: 5,
+          yAxisIndex: 9,
           data: premiumData,
           showSymbol: false,
           lineStyle: { color: "#c11574", width: 1.8 },
@@ -721,8 +758,8 @@ export default function MarketMicrostructureChart({
         {
           name: "BTC on OI",
           type: "line",
-          xAxisIndex: 4,
-          yAxisIndex: 9,
+          xAxisIndex: 5,
+          yAxisIndex: 10,
           data: priceData,
           showSymbol: false,
           lineStyle: { color: "#475467", width: 1.6, opacity: 0.82 },
@@ -770,6 +807,13 @@ export default function MarketMicrostructureChart({
         <div className="chart-help-note" role="note">
           <strong>{activeHelp.label}</strong>
           <p>{activeHelp.text}</p>
+          {activeHelp.details ? (
+            <ul>
+              {activeHelp.details.map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
       <div className="echarts-scroll">

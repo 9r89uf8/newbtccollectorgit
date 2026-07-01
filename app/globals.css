@@ -951,13 +951,13 @@ td strong {
 
 .echarts-market-chart {
   width: max(1080px, 100%);
-  height: 1150px;
+  height: 1280px;
 }
 
 @media (max-width: 760px) {
   .echarts-market-chart {
     width: 1080px;
-    height: 1150px;
+    height: 1280px;
   }
 }
 
@@ -1026,4 +1026,15 @@ td strong {
   color: var(--muted);
   line-height: 1.5;
   margin: 0;
+}
+
+.chart-help-note ul {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.chart-help-note li + li {
+  margin-top: 6px;
 }

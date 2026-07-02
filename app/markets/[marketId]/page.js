@@ -210,12 +210,20 @@ function ClassificationSummary({ classification, behaviorLabel, positionFeature 
               <strong className={signedClass(positionFeature?.open_interest_change_pct)}>{formatPct(positionFeature?.open_interest_change_pct)}</strong>
             </div>
             <div>
-              <span>Premium change</span>
+              <span>Basis</span>
+              <strong className={signedClass(positionFeature?.basis_bps)}>{formatBps(positionFeature?.basis_bps)}</strong>
+            </div>
+            <div>
+              <span>Basis 5m change</span>
+              <strong className={signedClass(positionFeature?.basis_bps_change)}>{formatBps(positionFeature?.basis_bps_change)}</strong>
+            </div>
+            <div>
+              <span>Mark/index change</span>
               <strong className={signedClass(positionFeature?.premium_bps_change)}>{formatBps(positionFeature?.premium_bps_change)}</strong>
             </div>
             <div>
-              <span>Positioning</span>
-              <strong>{positionFeature ? positionFeature.position_quality : "missing"}</strong>
+              <span>Data quality</span>
+              <strong>{positionFeature ? `${positionFeature.position_quality} / ${positionFeature.basis_quality || "missing"}` : "missing"}</strong>
             </div>
           </div>
           {reasons.length > 0 ? <p className="feature-footnote">{reasons.join(" ")}</p> : null}

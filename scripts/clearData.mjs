@@ -18,6 +18,7 @@ const DATA_TABLES = [
   "market_feature_buckets",
   "market_classifications",
   "futures_ws_1s_summaries",
+  "futures_basis_samples",
   "derivative_position_samples",
   "book_samples",
   "agg_trades",

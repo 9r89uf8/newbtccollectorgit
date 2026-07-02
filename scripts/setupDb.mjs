@@ -10,6 +10,7 @@ const hypertables = [
   { table: "price_samples", timeColumn: "scheduled_at" },
   { table: "book_samples", timeColumn: "scheduled_at" },
   { table: "derivative_position_samples", timeColumn: "scheduled_at" },
+  { table: "futures_basis_samples", timeColumn: "basis_time" },
   { table: "polymarket_probability_samples", timeColumn: "scheduled_at" },
   { table: "futures_ws_1s_summaries", timeColumn: "bucket_start" },
   { table: "market_forward_labels", timeColumn: "bucket_start" },

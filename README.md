@@ -69,6 +69,7 @@ The collector records the original spot/futures last-price samples and, by defau
 - Binance Futures aggregate trades for taker buy/sell flow
 - Binance Futures top-20 book depth for liquidity and imbalance
 - Binance Futures mark/index/funding/open-interest positioning samples on a 5 second cadence
+- Binance Futures 5 minute basis samples for canonical futures-vs-index basis
 - Binance Futures WebSocket book-ticker and liquidation 1-second summaries
 - One derived `market_features` row per closed market
 - One derived `market_position_features` row per closed market
@@ -87,6 +88,8 @@ ENABLE_FUTURES_MICROSTRUCTURE=true
 ENABLE_FUTURES_POSITIONING=true
 ENABLE_FUTURES_WEBSOCKET_SUMMARIES=true
 ENABLE_POLYMARKET_BTC_5M=true
+BINANCE_BASIS_PERIOD=5m
+BINANCE_BASIS_CONTRACT_TYPE=PERPETUAL
 POLYMARKET_TIMEOUT_MS=4000
 POLYMARKET_METADATA_PREFETCH_LEAD_MS=60000
 FORWARD_LABEL_MIN_THRESHOLD_BPS=1
@@ -94,7 +97,7 @@ LARGE_TRADE_QUOTE_THRESHOLD=1000000
 MAX_AGG_TRADE_PAGES_PER_MARKET=30
 ```
 
-Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector plus Polymarket, unless Polymarket is separately disabled. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed. Set `ENABLE_POLYMARKET_BTC_5M=false` to disable Polymarket probability collection.
+Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector plus Polymarket, unless Polymarket is separately disabled. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest and basis samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed. Set `ENABLE_POLYMARKET_BTC_5M=false` to disable Polymarket probability collection.
 
 The collector prefetches Polymarket market metadata before the next 5 minute window starts, then records the next market opening CLOB midpoint sample at the prior market close boundary. `POLYMARKET_METADATA_PREFETCH_LEAD_MS` controls how early that metadata lookup starts.
 
@@ -119,6 +122,7 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `market_labels`
 - `market_features`
 - `derivative_position_samples`
+- `futures_basis_samples`
 - `futures_ws_1s_summaries`
 - `market_position_features`
 - `market_behavior_labels`
@@ -132,7 +136,7 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `collector_heartbeats`
 - `collection_errors`
 
-`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `polymarket_probability_samples`, `futures_ws_1s_summaries`, `market_forward_labels`, and `market_microprice_buckets` into hypertables.
+`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `futures_basis_samples`, `polymarket_probability_samples`, `futures_ws_1s_summaries`, `market_forward_labels`, and `market_microprice_buckets` into hypertables.
 
 ## Health endpoint
 

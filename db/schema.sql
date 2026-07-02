@@ -130,6 +130,36 @@ create index if not exists derivative_position_samples_symbol_source_time_idx
 create index if not exists derivative_position_samples_time_idx
   on derivative_position_samples (scheduled_at desc);
 
+create table if not exists futures_basis_samples (
+  id bigserial not null,
+  basis_time timestamptz not null,
+  collected_at timestamptz not null default now(),
+  source text not null,
+  instrument_type text not null,
+  symbol text not null,
+  pair text not null,
+  contract_type text not null,
+  period text not null,
+  index_price numeric(20, 8) not null,
+  futures_price numeric(20, 8) not null,
+  basis numeric(20, 8) not null,
+  basis_rate numeric(20, 12) not null,
+  basis_bps numeric(14, 8) not null,
+  raw_timestamp_ms bigint not null,
+  basis_latency_ms integer not null,
+  created_at timestamptz not null default now(),
+  primary key (id, basis_time)
+);
+
+create unique index if not exists futures_basis_samples_one_per_slot
+  on futures_basis_samples (basis_time, source, pair, contract_type, period);
+
+create index if not exists futures_basis_samples_pair_source_time_idx
+  on futures_basis_samples (pair, source, contract_type, period, basis_time desc);
+
+create index if not exists futures_basis_samples_time_idx
+  on futures_basis_samples (basis_time desc);
+
 create table if not exists polymarket_5m_btc_markets (
   source text not null default 'polymarket_gamma',
   market_id text not null references markets(id) on delete cascade,
@@ -374,11 +404,33 @@ create table if not exists market_position_features (
   open_interest_change_base numeric(30, 12),
   open_interest_change_quote numeric(30, 8),
   open_interest_change_pct numeric(14, 8),
+  basis_sample_count integer not null default 0,
+  basis_time timestamptz,
+  basis_index_price numeric(20, 8),
+  basis_futures_price numeric(20, 8),
+  basis numeric(20, 8),
+  basis_rate numeric(20, 12),
+  basis_bps numeric(14, 8),
+  basis_bps_previous numeric(14, 8),
+  basis_bps_change numeric(14, 8),
+  basis_quality text not null default 'missing' check (basis_quality in ('complete', 'missing')),
   position_quality text not null check (position_quality in ('complete', 'partial', 'missing')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (market_id, source)
 );
+
+alter table if exists market_position_features
+  add column if not exists basis_sample_count integer not null default 0,
+  add column if not exists basis_time timestamptz,
+  add column if not exists basis_index_price numeric(20, 8),
+  add column if not exists basis_futures_price numeric(20, 8),
+  add column if not exists basis numeric(20, 8),
+  add column if not exists basis_rate numeric(20, 12),
+  add column if not exists basis_bps numeric(14, 8),
+  add column if not exists basis_bps_previous numeric(14, 8),
+  add column if not exists basis_bps_change numeric(14, 8),
+  add column if not exists basis_quality text not null default 'missing' check (basis_quality in ('complete', 'missing'));
 
 create index if not exists market_position_features_source_updated_idx
   on market_position_features (source, updated_at desc);

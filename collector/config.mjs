@@ -71,6 +71,9 @@ export const ENABLE_POLYMARKET_BTC_5M = readBoolean("ENABLE_POLYMARKET_BTC_5M", 
 export const POSITION_SAMPLE_INTERVAL_MS = 5 * 1000;
 export const EXPECTED_POSITION_SAMPLES_PER_MARKET =
   MARKET_MS / POSITION_SAMPLE_INTERVAL_MS;
+export const BASIS_SAMPLE_PERIOD = process.env.BINANCE_BASIS_PERIOD || "5m";
+export const FUTURES_BASIS_CONTRACT_TYPE =
+  process.env.BINANCE_BASIS_CONTRACT_TYPE || "PERPETUAL";
 export const LARGE_TRADE_QUOTE_THRESHOLD = readPositiveNumber(
   "LARGE_TRADE_QUOTE_THRESHOLD",
   1_000_000
@@ -137,6 +140,21 @@ export const FUTURES_MICROSTRUCTURE_SOURCE = {
   openInterestUrl: () =>
     buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/openInterest", {
       symbol: SYMBOL,
+    }),
+  basisUrl: ({
+    startTime,
+    endTime,
+    limit = 10,
+    period = BASIS_SAMPLE_PERIOD,
+    contractType = FUTURES_BASIS_CONTRACT_TYPE,
+  } = {}) =>
+    buildUrl(BINANCE_FUTURES_BASE_URL, "/futures/data/basis", {
+      pair: SYMBOL,
+      contractType,
+      period,
+      limit,
+      startTime,
+      endTime,
     }),
   aggTradesUrl: ({ startTime, endTime, fromId, limit = AGG_TRADE_PAGE_LIMIT } = {}) =>
     buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/aggTrades", {

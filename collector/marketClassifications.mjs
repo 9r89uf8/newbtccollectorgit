@@ -48,7 +48,9 @@ function classifyRow(row) {
   const rangeBps = toNumber(row.range_bps);
   const takerImbalance = toNumber(row.taker_imbalance);
   const oiChangePct = toNumber(row.open_interest_change_pct);
-  const premiumChangeBps = toNumber(row.premium_bps_change);
+  const markIndexBasisChangeBps = toNumber(row.premium_bps_change);
+  const basisBps = toNumber(row.basis_bps);
+  const basisChangeBps = toNumber(row.basis_bps_change);
   const hasBehavior = row.behavior_quality && row.behavior_quality !== "missing";
   const hasPositioning = row.position_quality && row.position_quality !== "missing" && oiChangePct !== null;
 
@@ -57,8 +59,12 @@ function classifyRow(row) {
   addTag(tags, row.close_location_class && `close_${row.close_location_class}`);
   if (!hasPositioning) addTag(tags, "positioning_missing");
   if (row.position_quality === "partial") addTag(tags, "positioning_partial");
-  if (premiumChangeBps !== null && premiumChangeBps > 1) addTag(tags, "premium_expanding");
-  if (premiumChangeBps !== null && premiumChangeBps < -1) addTag(tags, "premium_contracting");
+  if (basisBps !== null && basisBps > 1) addTag(tags, "basis_positive");
+  if (basisBps !== null && basisBps < -1) addTag(tags, "basis_negative");
+  if (basisChangeBps !== null && basisChangeBps > 1) addTag(tags, "basis_widening");
+  if (basisChangeBps !== null && basisChangeBps < -1) addTag(tags, "basis_narrowing");
+  if (markIndexBasisChangeBps !== null && markIndexBasisChangeBps > 1) addTag(tags, "mark_index_basis_expanding");
+  if (markIndexBasisChangeBps !== null && markIndexBasisChangeBps < -1) addTag(tags, "mark_index_basis_contracting");
 
   if (!hasBehavior || returnBps === null) {
     reasons.push("No usable behavior label was available for this market.");
@@ -185,6 +191,8 @@ async function readClassificationInputs(market, source) {
         mpf.open_interest_change_pct,
         mpf.open_interest_change_quote,
         mpf.premium_bps_change,
+        mpf.basis_bps,
+        mpf.basis_bps_change,
         mpf.position_quality
       from markets m
       left join market_labels ml

@@ -10,7 +10,7 @@ The collector tracks one symbol by default:
 BTCUSDT
 ```
 
-It records four data families.
+It records these data families.
 
 | Family | Source | Instrument type | Endpoint | Stored data |
 | --- | --- | --- | --- | --- |
@@ -18,12 +18,13 @@ It records four data families.
 | Last price | `binance_futures` | `futures` | `/fapi/v2/ticker/price` | Latest traded price samples. |
 | Aggregate trades | `binance_futures` | `futures` | `/fapi/v1/aggTrades` | Raw aggregate trades for each completed market. |
 | Top-20 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=20` | Derived top-of-book and depth metrics at each scheduled sample time. |
-| Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, premium, funding, and current open interest on a 5 second cadence. |
+| Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, mark/index basis, funding, and current open interest on a 5 second cadence. |
+| Futures basis | `binance_futures` | `futures` | `/futures/data/basis` | Binance 5 minute basis, basis rate, futures price, and index price for `PERPETUAL` by default. |
 | Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata and paired Up/Down midpoint probabilities. |
 | Top-of-book updates | `binance_futures_ws` | `futures` | WebSocket `@bookTicker` | One-second top-of-book summaries. Raw messages are not stored. |
 | Liquidation events | `binance_futures_ws` | `futures` | WebSocket `@forceOrder` | One-second liquidation notional summaries. Raw events are not stored. |
 
-The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, and CLOB midpoint probability samples are written to `polymarket_probability_samples`.
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance basis rows are written to `futures_basis_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, and CLOB midpoint probability samples are written to `polymarket_probability_samples`.
 
 ## Sampling Schedule
 
@@ -253,6 +254,8 @@ mark_latency_ms
 open_interest_latency_ms
 ```
 
+`premium_bps` is the legacy column name for mark/index basis: `(mark_price - index_price) / index_price * 10000`. It is not Binance `/futures/data/basis`.
+
 Market-level positioning features are materialized in `market_position_features` using samples where:
 
 ```sql
@@ -277,7 +280,20 @@ open_interest_quote_start
 open_interest_quote_end
 open_interest_change_quote
 open_interest_change_pct
+basis_time
+basis
+basis_rate
+basis_bps
+basis_bps_previous
+basis_bps_change
+basis_quality
 ```
+
+## Futures Basis Samples
+
+At market close, the collector fetches Binance `/futures/data/basis` with `pair=BTCUSDT`, `contractType=PERPETUAL`, and `period=5m` by default. The endpoint is an interval/historical feed, not a 5 second live stream.
+
+Rows are stored in `futures_basis_samples` and rolled into `market_position_features`. `basis_bps` is calculated as `basis_rate * 10000`. `basis_bps_change` compares the selected market basis row with the previous stored basis row when available.
 
 ## WebSocket Summary Samples
 
@@ -603,9 +619,10 @@ Because futures aggregate trades are fetched after market close, this CVD is cur
 | `book_samples` | Stores derived Binance Futures top-20 book metrics. |
 | `market_labels` | Stores open/close labels per market and source. |
 | `market_features` | Stores futures trade-flow and book-liquidity features per market. |
-| `derivative_position_samples` | Stores compact Binance Futures mark/index/funding/open-interest samples. |
+| `derivative_position_samples` | Stores compact Binance Futures mark/index/funding/open-interest samples. `premium_bps` is mark/index basis. |
+| `futures_basis_samples` | Stores Binance `/futures/data/basis` interval basis rows. |
 | `futures_ws_1s_summaries` | Stores Binance Futures WebSocket book-ticker and liquidation summaries by 1-second bucket. |
-| `market_position_features` | Stores per-market positioning rollups derived from positioning samples. |
+| `market_position_features` | Stores per-market positioning rollups derived from positioning and basis samples. |
 | `market_behavior_labels` | Stores richer per-market futures behavior labels derived from existing samples and trades. |
 | `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
@@ -625,7 +642,7 @@ Because futures aggregate trades are fetched after market close, this CVD is cur
 - `price_samples` and `book_samples` can become Timescale hypertables when TimescaleDB is installed.
 - Aggregate trades are kept as a plain PostgreSQL table because the uniqueness rule is `(source, symbol, agg_trade_id)`.
 - Futures microstructure collection is enabled by default and can be disabled with `ENABLE_FUTURES_MICROSTRUCTURE=false`.
-- Futures positioning collection is enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.
+- Futures positioning and basis collection are enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.
 - Futures WebSocket summary collection is enabled by default and can be disabled with `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false`.
 - Polymarket BTC 5 minute probability collection is enabled by default and can be disabled with `ENABLE_POLYMARKET_BTC_5M=false`.
 - WebSocket storage is summary-only. Raw WebSocket messages and raw liquidation events are intentionally not stored.

@@ -78,9 +78,9 @@ const HELP_TOPICS = [
     ],
   },
   {
-    id: "premium",
-    label: "Premium",
-    text: "Perp mark price minus index price in bps. Positive means futures trade above the index, often showing leveraged long demand. Negative means futures trade below index, often showing weaker demand or heavier short pressure. The dashed line is zero.",
+    id: "markIndexBasis",
+    label: "Mark/index",
+    text: "Perp mark price minus Binance index price in bps. This is the live 5-second mark/index basis from the mark-price endpoint, not the Binance /futures/data/basis feed. The dashed line is zero.",
   },
 ];
 
@@ -254,7 +254,7 @@ function buildTooltip(params) {
       ${row("Book updates", "Book updates", formatCount)}
       ${row("Open interest", "Open interest", formatOpenInterestUsd, 2)}
       ${detail("OI change", "Open interest", 1, formatSignedCompactUsd)}
-      ${row("Premium", "Premium", formatBps)}
+      ${row("Mark/index basis", "Mark/index basis", formatBps)}
       ${row("BTC on OI", "BTC on OI", formatPrice)}
     </div>
   `;
@@ -544,7 +544,7 @@ export default function MarketMicrostructureChart({
           scale: true,
           min: (value) => Math.min(value.min, 0),
           max: (value) => Math.max(value.max, 0),
-          name: "Premium",
+          name: "Mark/index",
           nameTextStyle: { color: "#c11574", fontSize: 11 },
           axisLine: { lineStyle: { color: "#c11574" } },
           axisLabel: { color: "#c11574", formatter: formatBps },
@@ -740,7 +740,7 @@ export default function MarketMicrostructureChart({
           lineStyle: { color: "#0e7490", width: 1.8 },
         },
         {
-          name: "Premium",
+          name: "Mark/index basis",
           type: "line",
           xAxisIndex: 5,
           yAxisIndex: 9,

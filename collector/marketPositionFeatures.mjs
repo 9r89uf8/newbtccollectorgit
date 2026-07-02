@@ -1,6 +1,8 @@
 import { query } from "../lib/db.js";
 import {
+  BASIS_SAMPLE_PERIOD,
   EXPECTED_POSITION_SAMPLES_PER_MARKET,
+  FUTURES_BASIS_CONTRACT_TYPE,
   FUTURES_MICROSTRUCTURE_SOURCE,
 } from "./config.mjs";
 
@@ -44,6 +46,42 @@ export async function writeMarketPositionFeatures(market) {
           max(open_interest_quote) as open_interest_quote_max
         from samples
       ),
+      basis_window as (
+        select *
+        from futures_basis_samples
+        where pair = $1
+          and source = $2
+          and contract_type = $7
+          and period = $8
+          and basis_time >= $3::timestamptz - interval '5 minutes'
+          and basis_time <= $4::timestamptz + interval '5 minutes'
+      ),
+      basis_current as (
+        select *
+        from basis_window
+        where basis_time >= $3
+          and basis_time <= $4
+        order by basis_time desc
+        limit 1
+      ),
+      basis_previous as (
+        select previous.*
+        from futures_basis_samples previous
+        left join basis_current current_basis on true
+        where previous.pair = $1
+          and previous.source = $2
+          and previous.contract_type = $7
+          and previous.period = $8
+          and previous.basis_time < coalesce(current_basis.basis_time, $3::timestamptz)
+        order by previous.basis_time desc
+        limit 1
+      ),
+      basis_counts as (
+        select count(*)::int as basis_sample_count
+        from basis_window
+        where basis_time >= $3
+          and basis_time <= $4
+      ),
       features as (
         select
           counts.sample_count,
@@ -77,6 +115,19 @@ export async function writeMarketPositionFeatures(market) {
             (last_sample.open_interest_quote - first_sample.open_interest_quote)
             / nullif(first_sample.open_interest_quote, 0)
           ) * 100 as open_interest_change_pct,
+          basis_counts.basis_sample_count,
+          basis_current.basis_time,
+          basis_current.index_price as basis_index_price,
+          basis_current.futures_price as basis_futures_price,
+          basis_current.basis,
+          basis_current.basis_rate,
+          basis_current.basis_bps,
+          basis_previous.basis_bps as basis_bps_previous,
+          basis_current.basis_bps - basis_previous.basis_bps as basis_bps_change,
+          case
+            when basis_current.basis_time is null then 'missing'
+            else 'complete'
+          end as basis_quality,
           case
             when counts.sample_count = 0 then 'missing'
             when counts.sample_count >= $5 then 'complete'
@@ -86,6 +137,9 @@ export async function writeMarketPositionFeatures(market) {
         left join first_sample on true
         left join last_sample on true
         left join stats on true
+        left join basis_counts on true
+        left join basis_current on true
+        left join basis_previous on true
       )
       insert into market_position_features
         (
@@ -116,6 +170,16 @@ export async function writeMarketPositionFeatures(market) {
           open_interest_change_base,
           open_interest_change_quote,
           open_interest_change_pct,
+          basis_sample_count,
+          basis_time,
+          basis_index_price,
+          basis_futures_price,
+          basis,
+          basis_rate,
+          basis_bps,
+          basis_bps_previous,
+          basis_bps_change,
+          basis_quality,
           position_quality,
           updated_at
         )
@@ -147,6 +211,16 @@ export async function writeMarketPositionFeatures(market) {
         open_interest_change_base,
         open_interest_change_quote,
         open_interest_change_pct,
+        basis_sample_count,
+        basis_time,
+        basis_index_price,
+        basis_futures_price,
+        basis,
+        basis_rate,
+        basis_bps,
+        basis_bps_previous,
+        basis_bps_change,
+        basis_quality,
         position_quality,
         now()
       from features
@@ -176,6 +250,16 @@ export async function writeMarketPositionFeatures(market) {
         open_interest_change_base = excluded.open_interest_change_base,
         open_interest_change_quote = excluded.open_interest_change_quote,
         open_interest_change_pct = excluded.open_interest_change_pct,
+        basis_sample_count = excluded.basis_sample_count,
+        basis_time = excluded.basis_time,
+        basis_index_price = excluded.basis_index_price,
+        basis_futures_price = excluded.basis_futures_price,
+        basis = excluded.basis,
+        basis_rate = excluded.basis_rate,
+        basis_bps = excluded.basis_bps,
+        basis_bps_previous = excluded.basis_bps_previous,
+        basis_bps_change = excluded.basis_bps_change,
+        basis_quality = excluded.basis_quality,
         position_quality = excluded.position_quality,
         updated_at = now()
       returning *
@@ -187,6 +271,8 @@ export async function writeMarketPositionFeatures(market) {
       market.end,
       EXPECTED_POSITION_SAMPLES_PER_MARKET,
       market.id,
+      FUTURES_BASIS_CONTRACT_TYPE,
+      BASIS_SAMPLE_PERIOD,
     ]
   );
 

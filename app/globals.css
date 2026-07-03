@@ -952,7 +952,7 @@ td strong {
 .echarts-chart-stage {
   position: relative;
   width: max(1080px, 100%);
-  height: 1280px;
+  height: 1140px;
 }
 
 .echarts-market-chart {
@@ -960,7 +960,9 @@ td strong {
   height: 100%;
 }
 
+.flow-panel-help-row,
 .microprice-panel-help-row,
+.oi-panel-help-row,
 .imbalance-panel-help-row {
   position: absolute;
   z-index: 2;
@@ -969,17 +971,29 @@ td strong {
   gap: 6px;
 }
 
+.flow-panel-help-row {
+  top: 270px;
+  right: 150px;
+}
+
 .microprice-panel-help-row {
-  top: 424px;
+  top: 460px;
   left: 386px;
 }
 
 .imbalance-panel-help-row {
-  top: 637px;
+  top: 665px;
   right: 150px;
 }
 
+.oi-panel-help-row {
+  top: 850px;
+  left: 520px;
+}
+
+.flow-panel-help-note,
 .microprice-panel-help-note,
+.oi-panel-help-note,
 .imbalance-panel-help-note {
   position: absolute;
   z-index: 3;
@@ -988,21 +1002,33 @@ td strong {
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
 }
 
+.flow-panel-help-note {
+  top: 304px;
+  right: 150px;
+  width: min(420px, calc(100% - 250px));
+}
+
 .microprice-panel-help-note {
-  top: 458px;
+  top: 494px;
   left: 386px;
 }
 
 .imbalance-panel-help-note {
-  top: 671px;
+  top: 699px;
   right: 150px;
   width: min(420px, calc(100% - 250px));
+}
+
+.oi-panel-help-note {
+  top: 884px;
+  left: 520px;
+  width: min(420px, calc(100% - 620px));
 }
 
 @media (max-width: 760px) {
   .echarts-chart-stage {
     width: 1080px;
-    height: 1280px;
+    height: 1140px;
   }
 }
 

@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
 
+const FLOW_HELP_TOPIC_IDS = new Set(["netTaker", "cvd", "micropricePressure", "netLiquidation"]);
 const MICROPRICE_HELP_TOPIC_IDS = new Set(["microprice"]);
 const IMBALANCE_HELP_TOPIC_IDS = new Set(["takerImbalance", "bookImbalance", "spread"]);
+const OI_HELP_TOPIC_IDS = new Set(["openInterest", "markIndexBasis", "btcOnOi"]);
+const HIDDEN_HELP_TOPIC_IDS = new Set(["bookUpdates"]);
 
 const HELP_TOPICS = [
   {
@@ -38,6 +41,15 @@ const HELP_TOPICS = [
     id: "netLiquidation",
     label: "Net liq",
     text: "One-second liquidation notional from the WebSocket force-order stream. Positive means buy liquidation notional exceeded sell liquidation notional; negative means sell liquidations dominated.",
+  },
+  {
+    id: "micropricePressure",
+    label: "Micropressure",
+    text: "Microprice pressure is the market-reset running sum of one-second microprice lean. Positive means the top-of-book has leaned toward upward pressure over the market; negative means it has leaned toward downward pressure.",
+    details: [
+      "It is not dollar volume. It accumulates normalized top-of-book lean, so values can extend beyond -1 to +1.",
+      "Use it with CVD and net taker flow: flow tells you what executed, while micropressure tells you how the displayed best bid/ask leaned.",
+    ],
   },
   {
     id: "takerImbalance",
@@ -78,7 +90,7 @@ const HELP_TOPICS = [
   {
     id: "spread",
     label: "Spread",
-    text: "Best ask minus best bid, measured in basis points. Wider spread often means thinner or less stable liquidity. The WS spread line is the one-second WebSocket average.",
+    text: "Best ask minus best bid, measured in basis points. Wider spread often means thinner or less stable liquidity. The spread line in the imbalance panel uses sampled Binance Futures best bid/ask spread.",
   },
   {
     id: "bookUpdates",
@@ -106,6 +118,10 @@ const HELP_TOPICS = [
       "Mark price = Binance's calculated fair price for the BTCUSDT perp.",
       "Index price = Binance's spot-based BTC reference price.",
     ],
+  },  {
+    id: "btcOnOi",
+    label: "BTC on OI",
+    text: "BTC on OI is the Binance Futures BTC price drawn on the positioning panel as a reference line, so open-interest and mark/index moves can be compared against price direction in the same time window.",
   },
 ];
 
@@ -332,9 +348,6 @@ function buildTooltip(params) {
       ${row("Microprice 10s", "Microprice 10s", (value) => formatDecimal(value, 3))}
       ${detailText("Micro signal", "Microprice 10s", 2)}
       ${row("Spread", "Spread", formatBps)}
-      ${row("WS spread", "WS spread", formatBps)}
-      ${detail("WS spread max", "WS spread", 2, formatBps)}
-      ${row("Book updates", "Book updates", formatCount)}
       ${row("Open interest", "Open interest", formatOpenInterestUsd, 2)}
       ${detail("OI change", "Open interest", 1, formatSignedCompactUsd)}
       ${row("Mark/index basis", "Mark/index basis", formatBps)}
@@ -356,11 +369,15 @@ export default function MarketMicrostructureChart({
 }) {
   const chartRef = useRef(null);
   const [activeTopHelpId, setActiveTopHelpId] = useState(null);
+  const [activeFlowHelpId, setActiveFlowHelpId] = useState(null);
   const [activeMicropriceHelpId, setActiveMicropriceHelpId] = useState(null);
   const [activeImbalanceHelpId, setActiveImbalanceHelpId] = useState(null);
+  const [activeOiHelpId, setActiveOiHelpId] = useState(null);
   const activeTopHelp = HELP_TOPICS.find((topic) => topic.id === activeTopHelpId);
+  const activeFlowHelp = HELP_TOPICS.find((topic) => topic.id === activeFlowHelpId);
   const activeMicropriceHelp = HELP_TOPICS.find((topic) => topic.id === activeMicropriceHelpId);
   const activeImbalanceHelp = HELP_TOPICS.find((topic) => topic.id === activeImbalanceHelpId);
+  const activeOiHelp = HELP_TOPICS.find((topic) => topic.id === activeOiHelpId);
 
   const option = useMemo(() => {
     const priceData = priceSeries
@@ -510,10 +527,31 @@ export default function MarketMicrostructureChart({
         },
         {
           data: [
+            { name: "Net taker", itemStyle: { color: "#067647" } },
+            { name: "CVD", itemStyle: { color: "#175cd3" } },
+            { name: "Microprice pressure", itemStyle: { color: "#c11574" } },
+            { name: "Net liquidation", itemStyle: { color: "#0e7490" } },
+          ],
+          top: 270,
+          left: 170,
+          icon: "rect",
+          itemWidth: 24,
+          itemHeight: 4,
+          formatter: (name) => {
+            const labels = {
+              "Net liquidation": "Net liq",
+              "Microprice pressure": "Micropressure",
+            };
+            return labels[name] || name;
+          },
+          textStyle: { color: "#475467", fontSize: 12 },
+        },
+        {
+          data: [
             { name: "Microprice EWMA 3s", itemStyle: { color: "#c11574" } },
             { name: "Microprice 10s", itemStyle: { color: "#155eef" } },
           ],
-          top: 432,
+          top: 460,
           left: 170,
           icon: "rect",
           itemWidth: 24,
@@ -533,11 +571,30 @@ export default function MarketMicrostructureChart({
             { name: "Book imbalance", itemStyle: { color: "#067647" } },
             { name: "Spread", itemStyle: { color: "#b54708" } },
           ],
-          top: 637,
+          top: 665,
           left: 170,
           icon: "rect",
           itemWidth: 24,
           itemHeight: 4,
+          textStyle: { color: "#475467", fontSize: 12 },
+        },
+        {
+          data: [
+            { name: "Open interest", itemStyle: { color: "#0e7490" } },
+            { name: "Mark/index basis", itemStyle: { color: "#c11574" } },
+            { name: "BTC on OI", itemStyle: { color: "#475467" } },
+          ],
+          top: 850,
+          left: 170,
+          icon: "rect",
+          itemWidth: 24,
+          itemHeight: 4,
+          formatter: (name) => {
+            const labels = {
+              "Open interest": "OI change",
+            };
+            return labels[name] || name;
+          },
           textStyle: { color: "#475467", fontSize: 12 },
         },
       ],
@@ -549,10 +606,10 @@ export default function MarketMicrostructureChart({
         formatter: buildTooltip,
       },
       dataZoom: [
-        { type: "inside", xAxisIndex: [0, 1, 2, 3, 4, 5], filterMode: "none" },
+        { type: "inside", xAxisIndex: [0, 1, 2, 3, 4], filterMode: "none" },
         {
           type: "slider",
-          xAxisIndex: [0, 1, 2, 3, 4, 5],
+          xAxisIndex: [0, 1, 2, 3, 4],
           filterMode: "none",
           bottom: 10,
           height: 22,
@@ -565,13 +622,12 @@ export default function MarketMicrostructureChart({
 
       grid: [
         { left: 78, right: 132, top: 58, height: 165 },
-        { left: 78, right: 132, top: 290, height: 105 },
-        { left: 78, right: 132, top: 480, height: 105 },
-        { left: 78, right: 132, top: 685, height: 110 },
-        { left: 78, right: 132, top: 870, height: 110 },
-        { left: 78, right: 132, top: 1040, height: 190 },
+        { left: 78, right: 132, top: 318, height: 105 },
+        { left: 78, right: 132, top: 508, height: 105 },
+        { left: 78, right: 132, top: 713, height: 110 },
+        { left: 78, right: 132, top: 898, height: 190 },
       ],
-      xAxis: [0, 1, 2, 3, 4, 5].map((gridIndex) => ({
+      xAxis: [0, 1, 2, 3, 4].map((gridIndex) => ({
         type: "time",
         gridIndex,
         min: start || undefined,
@@ -634,26 +690,6 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 4,
-          scale: true,
-          name: "WS spread",
-          nameTextStyle: { color: "#f79009", fontSize: 11 },
-          axisLabel: { color: "#f79009", formatter: formatBps },
-          splitLine: { lineStyle: { color: "#edf2f7" } },
-        },
-        {
-          type: "value",
-          gridIndex: 4,
-          position: "right",
-          min: 0,
-          scale: true,
-          name: "updates",
-          nameTextStyle: { color: "#667085", fontSize: 11 },
-          axisLabel: { color: "#667085", formatter: formatCount },
-          splitLine: { show: false },
-        },
-        {
-          type: "value",
           gridIndex: 1,
           position: "right",
           scale: true,
@@ -664,7 +700,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 5,
+          gridIndex: 4,
           scale: true,
           min: (value) => Math.min(value.min, 0),
           max: (value) => Math.max(value.max, 0),
@@ -675,7 +711,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 5,
+          gridIndex: 4,
           position: "right",
           scale: true,
           min: (value) => Math.min(value.min, 0),
@@ -688,7 +724,7 @@ export default function MarketMicrostructureChart({
         },
         {
           type: "value",
-          gridIndex: 5,
+          gridIndex: 4,
           position: "right",
           offset: 68,
           scale: true,
@@ -735,7 +771,7 @@ export default function MarketMicrostructureChart({
           name: "Market Up",
           type: "line",
           xAxisIndex: 0,
-          yAxisIndex: 11,
+          yAxisIndex: 9,
           data: marketUpData,
           showSymbol: false,
           lineStyle: { color: "#039855", width: 1.8 },
@@ -745,7 +781,7 @@ export default function MarketMicrostructureChart({
           name: "Market Down",
           type: "line",
           xAxisIndex: 0,
-          yAxisIndex: 11,
+          yAxisIndex: 9,
           data: marketDownData,
           showSymbol: false,
           lineStyle: { color: "#d92d20", width: 1.8 },
@@ -784,7 +820,7 @@ export default function MarketMicrostructureChart({
           name: "Microprice pressure",
           type: "line",
           xAxisIndex: 1,
-          yAxisIndex: 7,
+          yAxisIndex: 5,
           data: micropricePressureData,
           showSymbol: false,
           lineStyle: { color: "#c11574", width: 1.8 },
@@ -859,28 +895,10 @@ export default function MarketMicrostructureChart({
           itemStyle: { color: "#b54708" },
         },
         {
-          name: "WS spread",
-          type: "line",
-          xAxisIndex: 4,
-          yAxisIndex: 5,
-          data: wsSpreadData,
-          showSymbol: false,
-          lineStyle: { color: "#f79009", width: 1.8 },
-        },
-        {
-          name: "Book updates",
-          type: "bar",
-          xAxisIndex: 4,
-          yAxisIndex: 6,
-          data: bookUpdateData,
-          barMaxWidth: 4,
-          itemStyle: { color: "#667085", opacity: 0.34 },
-        },
-        {
           name: "Open interest",
           type: "line",
-          xAxisIndex: 5,
-          yAxisIndex: 8,
+          xAxisIndex: 4,
+          yAxisIndex: 6,
           data: openInterestData,
           showSymbol: false,
           lineStyle: { color: "#0e7490", width: 1.8 },
@@ -888,8 +906,8 @@ export default function MarketMicrostructureChart({
         {
           name: "Mark/index basis",
           type: "line",
-          xAxisIndex: 5,
-          yAxisIndex: 9,
+          xAxisIndex: 4,
+          yAxisIndex: 7,
           data: premiumData,
           showSymbol: false,
           lineStyle: { color: "#c11574", width: 1.8 },
@@ -904,15 +922,15 @@ export default function MarketMicrostructureChart({
         {
           name: "BTC on OI",
           type: "line",
-          xAxisIndex: 5,
-          yAxisIndex: 10,
+          xAxisIndex: 4,
+          yAxisIndex: 8,
           data: priceData,
           showSymbol: false,
           lineStyle: { color: "#475467", width: 1.6, opacity: 0.82 },
         },
       ],
     };
-  }, [buckets, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, webSocketSummaries]);
+  }, [buckets, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, tradeFlow1s, webSocketSummaries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;
@@ -934,10 +952,21 @@ export default function MarketMicrostructureChart({
   }
 
   const topHelpTopics = HELP_TOPICS.filter(
-    (topic) => !MICROPRICE_HELP_TOPIC_IDS.has(topic.id) && !IMBALANCE_HELP_TOPIC_IDS.has(topic.id)
+    (topic) =>
+      !FLOW_HELP_TOPIC_IDS.has(topic.id) &&
+      !MICROPRICE_HELP_TOPIC_IDS.has(topic.id) &&
+      !IMBALANCE_HELP_TOPIC_IDS.has(topic.id) &&
+      !OI_HELP_TOPIC_IDS.has(topic.id) &&
+      !HIDDEN_HELP_TOPIC_IDS.has(topic.id)
   );
+  const flowHelpTopics = [...FLOW_HELP_TOPIC_IDS]
+    .map((id) => HELP_TOPICS.find((topic) => topic.id === id))
+    .filter(Boolean);
   const micropriceHelpTopics = HELP_TOPICS.filter((topic) => MICROPRICE_HELP_TOPIC_IDS.has(topic.id));
   const imbalanceHelpTopics = HELP_TOPICS.filter((topic) => IMBALANCE_HELP_TOPIC_IDS.has(topic.id));
+  const oiHelpTopics = [...OI_HELP_TOPIC_IDS]
+    .map((id) => HELP_TOPICS.find((topic) => topic.id === id))
+    .filter(Boolean);
 
   return (
     <>
@@ -948,6 +977,7 @@ export default function MarketMicrostructureChart({
             className={`chart-help-button ${activeTopHelpId === topic.id ? "chart-help-button-active" : ""}`}
             key={topic.id}
             onClick={() => {
+              setActiveFlowHelpId(null);
               setActiveMicropriceHelpId(null);
               setActiveImbalanceHelpId(null);
               setActiveTopHelpId(activeTopHelpId === topic.id ? null : topic.id);
@@ -974,6 +1004,38 @@ export default function MarketMicrostructureChart({
       ) : null}
       <div className="echarts-scroll">
         <div className="echarts-chart-stage">
+          <div className="flow-panel-help-row" aria-label="Flow and CVD panel glossary">
+            {flowHelpTopics.map((topic) => (
+              <button
+                type="button"
+                className={`chart-help-button chart-help-button-compact ${activeFlowHelpId === topic.id ? "chart-help-button-active" : ""}`}
+                key={topic.id}
+                onClick={() => {
+                  setActiveTopHelpId(null);
+                  setActiveMicropriceHelpId(null);
+                  setActiveImbalanceHelpId(null);
+                  setActiveFlowHelpId(activeFlowHelpId === topic.id ? null : topic.id);
+                }}
+                aria-expanded={activeFlowHelpId === topic.id}
+              >
+                <span>{topic.label}</span>
+                <b>?</b>
+              </button>
+            ))}
+          </div>
+          {activeFlowHelp ? (
+            <div className="chart-help-note flow-panel-help-note" role="note">
+              <strong>{activeFlowHelp.label}</strong>
+              <p>{activeFlowHelp.text}</p>
+              {activeFlowHelp.details ? (
+                <ul>
+                  {activeFlowHelp.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <div className="microprice-panel-help-row" aria-label="Micro lean panel glossary">
             {micropriceHelpTopics.map((topic) => (
               <button
@@ -982,6 +1044,7 @@ export default function MarketMicrostructureChart({
                 key={topic.id}
                 onClick={() => {
                   setActiveTopHelpId(null);
+                  setActiveFlowHelpId(null);
                   setActiveImbalanceHelpId(null);
                   setActiveMicropriceHelpId(activeMicropriceHelpId === topic.id ? null : topic.id);
                 }}
@@ -1013,6 +1076,7 @@ export default function MarketMicrostructureChart({
                 key={topic.id}
                 onClick={() => {
                   setActiveTopHelpId(null);
+                  setActiveFlowHelpId(null);
                   setActiveMicropriceHelpId(null);
                   setActiveImbalanceHelpId(activeImbalanceHelpId === topic.id ? null : topic.id);
                 }}
@@ -1030,6 +1094,39 @@ export default function MarketMicrostructureChart({
               {activeImbalanceHelp.details ? (
                 <ul>
                   {activeImbalanceHelp.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="oi-panel-help-row" aria-label="Positioning panel glossary">
+            {oiHelpTopics.map((topic) => (
+              <button
+                type="button"
+                className={`chart-help-button chart-help-button-compact ${activeOiHelpId === topic.id ? "chart-help-button-active" : ""}`}
+                key={topic.id}
+                onClick={() => {
+                  setActiveTopHelpId(null);
+                  setActiveFlowHelpId(null);
+                  setActiveMicropriceHelpId(null);
+                  setActiveImbalanceHelpId(null);
+                  setActiveOiHelpId(activeOiHelpId === topic.id ? null : topic.id);
+                }}
+                aria-expanded={activeOiHelpId === topic.id}
+              >
+                <span>{topic.label}</span>
+                <b>?</b>
+              </button>
+            ))}
+          </div>
+          {activeOiHelp ? (
+            <div className="chart-help-note oi-panel-help-note" role="note">
+              <strong>{activeOiHelp.label}</strong>
+              <p>{activeOiHelp.text}</p>
+              {activeOiHelp.details ? (
+                <ul>
+                  {activeOiHelp.details.map((detail) => (
                     <li key={detail}>{detail}</li>
                   ))}
                 </ul>

@@ -1,7 +1,7 @@
 import { query } from "../lib/db.js";
 import { FUTURES_WEBSOCKET_SOURCE } from "./config.mjs";
 
-const FEATURE_VERSION = "microprice_v1";
+const FEATURE_VERSION = "microprice_v2";
 const STALE_BOOK_SECONDS = 5;
 const LEAN_THRESHOLD = 0.20;
 const MIN_VALID_10S = 8;
@@ -144,6 +144,7 @@ export async function writeMarketMicropriceBuckets(market) {
       lagged as (
         select
           *,
+          case when bucket_quality in ('complete', 'partial') then microprice_lean end as valid_microprice_lean,
           lag(mid_price, 10) over (
             partition by source, symbol
             order by bucket_start
@@ -155,12 +156,36 @@ export async function writeMarketMicropriceBuckets(market) {
           lag(case when bucket_quality in ('complete', 'partial') then microprice_lean end, 1) over (
             partition by source, symbol
             order by bucket_start
-          ) as prior_valid_lean
+          ) as prior_valid_lean,
+          lag(case when bucket_quality in ('complete', 'partial') then microprice_lean end, 2) over (
+            partition by source, symbol
+            order by bucket_start
+          ) as prior2_valid_lean
         from cumulative
       ),
       stats as (
         select
           *,
+          case
+            when valid_microprice_lean is not null
+              and prior_valid_lean is not null
+              then valid_microprice_lean - prior_valid_lean
+            else null
+          end as lean_delta_1s,
+          case
+            when valid_microprice_lean is not null then (
+              (valid_microprice_lean * 0.5000)
+                + coalesce(prior_valid_lean * 0.2500, 0)
+                + coalesce(prior2_valid_lean * 0.1250, 0)
+            ) / nullif(
+              0.5000
+                + case when prior_valid_lean is not null then 0.2500 else 0 end
+                + case when prior2_valid_lean is not null then 0.1250 else 0 end,
+              0
+            )
+            else null
+          end as ewma_lean_3s,
+          avg(microprice_lean) filter (where bucket_quality in ('complete', 'partial')) over win5 as avg_lean_5s,
           avg(microprice_lean) filter (where bucket_quality in ('complete', 'partial')) over win10 as avg_lean_10s,
           avg(microprice_lean) filter (where bucket_quality in ('complete', 'partial')) over win30 as avg_lean_30s,
           count(*) filter (where bucket_quality in ('complete', 'partial') and microprice_lean is not null) over win10 as valid_sample_count_10s,
@@ -207,6 +232,11 @@ export async function writeMarketMicropriceBuckets(market) {
           max(spread_bps_max) filter (where bucket_quality in ('complete', 'partial') and spread_bps_max is not null) over win30 as spread_max_30s
         from lagged
         window
+          win5 as (
+            partition by source, symbol
+            order by bucket_start
+            rows between 4 preceding and current row
+          ),
           win10 as (
             partition by source, symbol
             order by bucket_start
@@ -284,6 +314,7 @@ export async function writeMarketMicropriceBuckets(market) {
         select
           *,
           case
+            when bucket_quality not in ('complete', 'partial') then 'none'
             when avg_lean_30s >= $7
               and up_lean_share_30s >= 0.70
               and valid_sample_count_30s >= $9
@@ -349,6 +380,9 @@ export async function writeMarketMicropriceBuckets(market) {
           microprice_bps_from_mid,
           microprice_lean,
           microprice_delta,
+          lean_delta_1s,
+          ewma_lean_3s,
+          avg_lean_5s,
           microprice_pressure_market,
           microprice_pressure_continuous,
           avg_lean_10s,
@@ -395,6 +429,9 @@ export async function writeMarketMicropriceBuckets(market) {
           microprice_bps_from_mid,
           microprice_lean,
           microprice_delta,
+          lean_delta_1s,
+          ewma_lean_3s,
+          avg_lean_5s,
           microprice_pressure_market,
           microprice_pressure_continuous,
           avg_lean_10s,
@@ -438,6 +475,9 @@ export async function writeMarketMicropriceBuckets(market) {
         microprice_bps_from_mid = excluded.microprice_bps_from_mid,
         microprice_lean = excluded.microprice_lean,
         microprice_delta = excluded.microprice_delta,
+        lean_delta_1s = excluded.lean_delta_1s,
+        ewma_lean_3s = excluded.ewma_lean_3s,
+        avg_lean_5s = excluded.avg_lean_5s,
         microprice_pressure_market = excluded.microprice_pressure_market,
         microprice_pressure_continuous = excluded.microprice_pressure_continuous,
         avg_lean_10s = excluded.avg_lean_10s,

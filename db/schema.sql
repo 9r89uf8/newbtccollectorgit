@@ -573,6 +573,9 @@ create table if not exists market_microprice_buckets (
   microprice_bps_from_mid numeric(14, 8),
   microprice_lean numeric(14, 8),
   microprice_delta numeric(14, 8) not null default 0,
+  lean_delta_1s numeric(14, 8),
+  ewma_lean_3s numeric(14, 8),
+  avg_lean_5s numeric(14, 8),
   microprice_pressure_market numeric(30, 8) not null default 0,
   microprice_pressure_continuous numeric(30, 8) not null default 0,
   avg_lean_10s numeric(14, 8),
@@ -594,11 +597,18 @@ create table if not exists market_microprice_buckets (
   flip_signal text,
   microprice_behavior text,
   bucket_quality text not null check (bucket_quality in ('complete', 'partial', 'missing', 'stale')),
-  feature_version text not null default 'microprice_v1',
+  feature_version text not null default 'microprice_v2',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (market_id, source, bucket_start)
 );
+
+alter table if exists market_microprice_buckets
+  add column if not exists lean_delta_1s numeric(14, 8),
+  add column if not exists ewma_lean_3s numeric(14, 8),
+  add column if not exists avg_lean_5s numeric(14, 8),
+  add column if not exists feature_version text not null default 'microprice_v2',
+  alter column feature_version set default 'microprice_v2';
 
 create index if not exists market_microprice_buckets_source_time_idx
   on market_microprice_buckets (source, bucket_start desc);

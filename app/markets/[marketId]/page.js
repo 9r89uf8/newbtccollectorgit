@@ -561,6 +561,14 @@ function MicropriceBucketPanel({ buckets }) {
             <strong className={signedClass(latest?.microprice_pressure_market)}>{formatDecimal(latest?.microprice_pressure_market, 2)}</strong>
           </div>
           <div>
+            <span>Final raw lean</span>
+            <strong className={signedClass(latest?.microprice_lean)}>{formatDecimal(latest?.microprice_lean)}</strong>
+          </div>
+          <div>
+            <span>Final EWMA 3s</span>
+            <strong className={signedClass(latest?.ewma_lean_3s)}>{formatDecimal(latest?.ewma_lean_3s)}</strong>
+          </div>
+          <div>
             <span>Final 30s lean</span>
             <strong className={signedClass(latest?.avg_lean_30s)}>{formatDecimal(latest?.avg_lean_30s)}</strong>
           </div>
@@ -572,6 +580,9 @@ function MicropriceBucketPanel({ buckets }) {
               <tr>
                 <th>Second</th>
                 <th>Lean</th>
+                <th>Delta 1s</th>
+                <th>EWMA 3s</th>
+                <th>Avg 5s</th>
                 <th>Avg 10s</th>
                 <th>Avg 30s</th>
                 <th>Pressure</th>
@@ -584,13 +595,16 @@ function MicropriceBucketPanel({ buckets }) {
             <tbody>
               {buckets.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="empty-cell">No microprice buckets for this market.</td>
+                  <td colSpan="12" className="empty-cell">No microprice buckets for this market.</td>
                 </tr>
               ) : (
                 buckets.map((bucket) => (
                   <tr key={bucket.bucket_start}>
                     <td>{formatUtc(bucket.bucket_start)}</td>
                     <td className={signedClass(bucket.microprice_lean)}>{formatDecimal(bucket.microprice_lean)}</td>
+                    <td className={signedClass(bucket.lean_delta_1s)}>{formatDecimal(bucket.lean_delta_1s)}</td>
+                    <td className={signedClass(bucket.ewma_lean_3s)}>{formatDecimal(bucket.ewma_lean_3s)}</td>
+                    <td className={signedClass(bucket.avg_lean_5s)}>{formatDecimal(bucket.avg_lean_5s)}</td>
                     <td className={signedClass(bucket.avg_lean_10s)}>{formatDecimal(bucket.avg_lean_10s)}</td>
                     <td className={signedClass(bucket.avg_lean_30s)}>{formatDecimal(bucket.avg_lean_30s)}</td>
                     <td className={signedClass(bucket.microprice_pressure_market)}>{formatDecimal(bucket.microprice_pressure_market, 2)}</td>
@@ -851,6 +865,9 @@ export default async function MarketDetailPage({ params }) {
   const chartMicropriceBuckets = data.micropriceBuckets.map((bucket) => ({
     bucket_start: bucket.bucket_start instanceof Date ? bucket.bucket_start.toISOString() : bucket.bucket_start,
     microprice_lean: toChartNumber(bucket.microprice_lean),
+    lean_delta_1s: toChartNumber(bucket.lean_delta_1s),
+    ewma_lean_3s: toChartNumber(bucket.ewma_lean_3s),
+    avg_lean_5s: toChartNumber(bucket.avg_lean_5s),
     avg_lean_10s: toChartNumber(bucket.avg_lean_10s),
     avg_lean_30s: toChartNumber(bucket.avg_lean_30s),
     microprice_pressure_market: toChartNumber(bucket.microprice_pressure_market),

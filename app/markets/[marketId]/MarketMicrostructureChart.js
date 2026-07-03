@@ -56,10 +56,11 @@ const HELP_TOPICS = [
     label: "Microprice",
     text: "Microprice is the order book's center of gravity: (best ask * bid size + best bid * ask size) / (bid size + ask size). If bid size is heavier, microprice leans above the midprice toward the ask, which points to short-term upward pressure. If ask size is heavier, it leans below the midprice toward the bid, which points to short-term downward pressure.",
     details: [
-      "The visible microprice lines are rolling average lean, not the raw one-second lean. The raw one-second lean can whip from +1 to -1 quickly, so the chart hides it and focuses on persistence.",
-      "Microprice 10s is the average normalized lean over the last 10 valid seconds. It reacts faster and is useful for short bursts of book pressure.",
-      "Microprice 30s is the average normalized lean over the last 30 valid seconds. It is slower but usually more useful because it filters noise and shows persistent pressure.",
-      "Both visible lines stay on the -1 to +1 lean scale: above 0 = upward book pressure, below 0 = downward book pressure, near 0 = balanced. The separate pressure line can reach +30 or -70 because it accumulates one-second lean over time.",
+      "The microprice panel keeps raw one-second lean next to causal smoothed lines. Raw lean reacts fastest, while smoothed lines show whether the pressure persisted.",
+      "Microprice EWMA 3s is a causal exponentially weighted blend of the current valid second and the prior two seconds, so it is useful for 1s to 5s reads without looking ahead.",
+      "Microprice 5s and 10s are trailing average normalized lean over the last 5 and 10 valid seconds. They reduce noise while staying more responsive than the 30s line.",
+      "Microprice 30s is slower but useful for 30s to 60s reads because it filters noise and shows persistent pressure.",
+      "All visible lean lines stay on the -1 to +1 scale: above 0 = upward book pressure, below 0 = downward book pressure, near 0 = balanced. The separate pressure line can reach +30 or -70 because it accumulates one-second lean over time.",
     ],
   },
   {
@@ -327,6 +328,10 @@ function buildTooltip(params) {
       ${detail("30s net", "Taker pressure 30s", 2, formatCompactUsd)}
       ${detail("30s gross", "Taker pressure 30s", 3, formatCompactUsd)}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
+      ${row("Microprice raw", "Microprice raw", (value) => formatDecimal(value, 3))}
+      ${detail("Lean delta 1s", "Microprice raw", 2, (value) => formatDecimal(value, 3))}
+      ${row("Microprice EWMA 3s", "Microprice EWMA 3s", (value) => formatDecimal(value, 3))}
+      ${row("Microprice 5s", "Microprice 5s", (value) => formatDecimal(value, 3))}
       ${row("Microprice 10s", "Microprice 10s", (value) => formatDecimal(value, 3))}
       ${row("Microprice 30s", "Microprice 30s", (value) => formatDecimal(value, 3))}
       ${detailText("Micro signal", "Microprice 30s", 2)}
@@ -398,6 +403,9 @@ export default function MarketMicrostructureChart({
       .map((bucket) => ({
         time: toTimeValue(bucket.bucket_start),
         lean: finiteNumber(bucket.microprice_lean),
+        leanDelta1s: finiteNumber(bucket.lean_delta_1s),
+        ewmaLean3s: finiteNumber(bucket.ewma_lean_3s),
+        avgLean5s: finiteNumber(bucket.avg_lean_5s),
         avgLean10s: finiteNumber(bucket.avg_lean_10s),
         avgLean30s: finiteNumber(bucket.avg_lean_30s),
         pressureMarket: finiteNumber(bucket.microprice_pressure_market),
@@ -460,6 +468,15 @@ export default function MarketMicrostructureChart({
         signedLogNetTaker(summary.netLiquidation),
         summary.netLiquidation,
       ]);
+    const micropriceRawData = micropriceRows
+      .filter((bucket) => bucket.lean !== null)
+      .map((bucket) => [bucket.time, bucket.lean, bucket.leanDelta1s]);
+    const micropriceEwma3Data = micropriceRows
+      .filter((bucket) => bucket.ewmaLean3s !== null)
+      .map((bucket) => [bucket.time, bucket.ewmaLean3s]);
+    const micropriceAvg5Data = micropriceRows
+      .filter((bucket) => bucket.avgLean5s !== null)
+      .map((bucket) => [bucket.time, bucket.avgLean5s]);
     const micropriceAvg10Data = micropriceRows
       .filter((bucket) => bucket.avgLean10s !== null)
       .map((bucket) => [bucket.time, bucket.avgLean10s, bucket.persistenceSignal]);
@@ -571,7 +588,7 @@ export default function MarketMicrostructureChart({
           gridIndex: 2,
           min: -1,
           max: 1,
-          name: "avg lean",
+          name: "micro lean",
           nameTextStyle: { color: "#c11574", fontSize: 11 },
           axisLabel: { color: "#c11574", formatter: (value) => formatDecimal(value, 1) },
           splitLine: { lineStyle: { color: "#edf2f7" } },
@@ -786,6 +803,40 @@ export default function MarketMicrostructureChart({
           itemStyle: { color: "#067647" },
         },
 
+        {
+          name: "Microprice raw",
+          type: "line",
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          data: micropriceRawData,
+          showSymbol: false,
+          lineStyle: { color: "#98a2b3", width: 1, opacity: 0.75 },
+          markLine: {
+            symbol: "none",
+            silent: true,
+            label: { show: false },
+            lineStyle: { color: "#98a2b3", type: "dashed", width: 1 },
+            data: [{ yAxis: 0 }],
+          },
+        },
+        {
+          name: "Microprice EWMA 3s",
+          type: "line",
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          data: micropriceEwma3Data,
+          showSymbol: false,
+          lineStyle: { color: "#c11574", width: 1.8 },
+        },
+        {
+          name: "Microprice 5s",
+          type: "line",
+          xAxisIndex: 2,
+          yAxisIndex: 2,
+          data: micropriceAvg5Data,
+          showSymbol: false,
+          lineStyle: { color: "#0e7490", width: 1.55 },
+        },
         {
           name: "Microprice 10s",
           type: "line",

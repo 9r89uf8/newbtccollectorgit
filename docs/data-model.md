@@ -397,9 +397,11 @@ microprice
 microprice_bps_from_mid
 microprice_lean
 microprice_delta
+lean_delta_1s
+ewma_lean_3s
+avg_lean_5s / 10s / 30s
 microprice_pressure_market
 microprice_pressure_continuous
-avg_lean_10s / 30s
 up_lean_share_10s / 30s
 down_lean_share_10s / 30s
 valid_sample_count_10s / 30s
@@ -432,6 +434,8 @@ positive = bid side heavier = upward top-of-book pressure
 negative = ask side heavier = downward top-of-book pressure
 ```
 
+Short-horizon lean features are also causal. `lean_delta_1s` is the current valid lean minus the immediately prior one-second bucket when that prior bucket is valid. `ewma_lean_3s` uses current, one-second-prior, and two-second-prior valid lean with weights 0.50, 0.25, and 0.125, normalized by available weights. `avg_lean_5s / 10s / 30s` are trailing-only rolling means.
+
 Bucket quality can be:
 
 | Quality | Meaning |
@@ -441,7 +445,7 @@ Bucket quality can be:
 | `stale` | The latest valid book state is older than the signal staleness threshold. |
 | `missing` | No usable book state was available. |
 
-Persistence labels require enough valid samples in the 10s or 30s rolling window, same-direction lean share of at least 70%, and stable spread. Stale and missing seconds do not contribute to `microprice_delta` or persistence counts.
+Persistence labels require a current complete or partial bucket, enough valid samples in the 10s or 30s rolling window, same-direction lean share of at least 70%, and stable spread. Stale and missing seconds do not contribute to `microprice_delta`, short-horizon lean features, or persistence counts.
 
 `microprice_pressure_market` resets at each 5 minute market. `microprice_pressure_continuous` keeps running across markets for the same symbol and WebSocket source. As with continuous CVD, backfilling older microprice buckets requires recomputing later continuous rows.
 

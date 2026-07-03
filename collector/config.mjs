@@ -131,7 +131,7 @@ export const FUTURES_MICROSTRUCTURE_SOURCE = {
   depthUrl: () =>
     buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/depth", {
       symbol: SYMBOL,
-      limit: 20,
+      limit: 100,
     }),
   markPriceUrl: () =>
     buildUrl(BINANCE_FUTURES_BASE_URL, "/fapi/v1/premiumIndex", {

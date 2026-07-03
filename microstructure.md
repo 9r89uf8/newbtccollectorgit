@@ -365,7 +365,7 @@ large_aggressive_trade_count
 
 That is exactly what you need for the “market buys are hitting” or “market sells are hitting” part.
 
-For **thin book / liquidity imbalance**, you store Binance Futures top-20 depth metrics in `book_samples`, including:
+For **thin book / liquidity imbalance**, you store Binance Futures top-100 depth metrics in `book_samples`, including:
 
 ```text
 bid_depth_5bps

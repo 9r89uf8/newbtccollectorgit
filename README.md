@@ -67,7 +67,7 @@ The close sample for one window is also the open sample for the next window when
 The collector records the original spot/futures last-price samples and, by default, futures microstructure features:
 
 - Binance Futures aggregate trades for taker buy/sell flow
-- Binance Futures top-20 book depth for liquidity and imbalance
+- Binance Futures top-100 book depth for liquidity and imbalance
 - Binance Futures mark/index/funding/open-interest positioning samples on a 5 second cadence
 - Binance Futures 5 minute basis samples for canonical futures-vs-index basis
 - Binance Futures WebSocket book-ticker and liquidation 1-second summaries

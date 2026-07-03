@@ -17,7 +17,7 @@ It records these data families.
 | Last price | `binance_spot` | `spot` | `/api/v3/ticker/price` | Latest traded price samples. |
 | Last price | `binance_futures` | `futures` | `/fapi/v2/ticker/price` | Latest traded price samples. |
 | Aggregate trades | `binance_futures` | `futures` | `/fapi/v1/aggTrades` | Raw aggregate trades for each completed market. |
-| Top-20 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=20` | Derived top-of-book and depth metrics at each scheduled sample time. |
+| Top-100 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=100` | Derived top-of-book and depth metrics at each scheduled sample time. |
 | Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, mark/index basis, funding, and current open interest on a 5 second cadence. |
 | Futures basis | `binance_futures` | `futures` | `/futures/data/basis` | Binance 5 minute basis, basis rate, futures price, and index price for `PERPETUAL` by default. |
 | Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata and paired Up/Down midpoint probabilities. |
@@ -200,7 +200,7 @@ The collector pages through `/fapi/v1/aggTrades` and caps pages per market with 
 
 ## Book Samples
 
-At each scheduled sample time, the collector fetches Binance Futures top-20 depth and stores derived features in `book_samples`:
+At each scheduled sample time, the collector fetches Binance Futures top-100 depth and stores derived features in `book_samples`:
 
 ```text
 best_bid_price
@@ -616,7 +616,7 @@ Because futures aggregate trades are fetched after market close, this CVD is cur
 | `markets` | Defines 5 minute BTCUSDT windows. |
 | `price_samples` | Stores spot and futures latest-price samples. |
 | `agg_trades` | Stores raw Binance Futures aggregate trades. |
-| `book_samples` | Stores derived Binance Futures top-20 book metrics. |
+| `book_samples` | Stores derived Binance Futures top-100 book metrics. |
 | `market_labels` | Stores open/close labels per market and source. |
 | `market_features` | Stores futures trade-flow and book-liquidity features per market. |
 | `derivative_position_samples` | Stores compact Binance Futures mark/index/funding/open-interest samples. `premium_bps` is mark/index basis. |

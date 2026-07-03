@@ -80,7 +80,14 @@ const HELP_TOPICS = [
   {
     id: "markIndexBasis",
     label: "Mark/index",
-    text: "Perp mark price minus Binance index price in bps. This is the live 5-second mark/index basis from the mark-price endpoint, not the Binance /futures/data/basis feed. The dashed line is zero.",
+    text: "Mark price is one price, index price is a different reference price, and mark/index is the gap between them measured in bps.",
+    details: [
+      "Example: mark_price = 59,726.81 and index_price = 59,751.19.",
+      "Then mark/index basis is about -4.08 bps.",
+      "Meaning: Binance's mark price was about 4.08 bps below its spot-based BTC index.",
+      "Mark price = Binance's calculated fair price for the BTCUSDT perp.",
+      "Index price = Binance's spot-based BTC reference price.",
+    ],
   },
 ];
 

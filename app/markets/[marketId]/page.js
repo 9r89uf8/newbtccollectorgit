@@ -73,6 +73,19 @@ function formatBps(value, digits = 2) {
   return `${number >= 0 ? "+" : ""}${number.toFixed(digits)} bps`;
 }
 
+function formatBasisDistance(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  const amount = formatPrice(Math.abs(number));
+  if (number > 0) {
+    return `Binance BTCUSDT perps were ${amount} above Binance's spot-based BTC index, a reference price built from spot prices across multiple exchanges.`;
+  }
+  if (number < 0) {
+    return `Binance BTCUSDT perps were ${amount} below Binance's spot-based BTC index, a reference price built from spot prices across multiple exchanges.`;
+  }
+  return "Binance BTCUSDT perps were at Binance's spot-based BTC index, a reference price built from spot prices across multiple exchanges.";
+}
+
 function formatConfidence(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -212,6 +225,10 @@ function ClassificationSummary({ classification, behaviorLabel, positionFeature 
             <div>
               <span>Basis</span>
               <strong className={signedClass(positionFeature?.basis_bps)}>{formatBps(positionFeature?.basis_bps)}</strong>
+            </div>
+            <div>
+              <span>Basis $</span>
+              <strong className={signedClass(positionFeature?.basis)}>{formatBasisDistance(positionFeature?.basis)}</strong>
             </div>
             <div>
               <span>Basis 5m change</span>

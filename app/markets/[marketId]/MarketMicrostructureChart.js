@@ -348,6 +348,7 @@ export default function MarketMicrostructureChart({
   marketEnd,
   priceSeries,
   buckets,
+  tradeFlow1s = [],
   positionSeries = [],
   webSocketSummaries = [],
   micropriceBuckets = [],
@@ -377,6 +378,17 @@ export default function MarketMicrostructureChart({
         spread: finiteNumber(bucket.spread_bps),
       }))
       .filter((bucket) => bucket.time !== null);
+    const tradeFlowRows = tradeFlow1s
+      .map((bucket) => ({
+        time: toTimeValue(bucket.bucket_start),
+        endTime: toTimeValue(bucket.bucket_end),
+        netTaker: finiteNumber(bucket.net_taker_quote),
+        grossTaker: finiteNumber(bucket.gross_taker_quote),
+        cvdMarket: finiteNumber(bucket.cvd_market_quote),
+        takerImbalance: finiteNumber(bucket.taker_imbalance),
+      }))
+      .filter((bucket) => bucket.time !== null);
+    const flowRows = tradeFlowRows.length > 0 ? tradeFlowRows : bucketRows;
     const positionRows = positionSeries
       .map((sample) => ({
         time: toTimeValue(sample.time),
@@ -419,13 +431,13 @@ export default function MarketMicrostructureChart({
       }))
       .filter((sample) => sample.time !== null);
 
-    const netTakerData = bucketRows
+    const netTakerData = flowRows
       .filter((bucket) => bucket.netTaker !== null)
       .map((bucket) => [bucket.time, signedLogNetTaker(bucket.netTaker), bucket.netTaker]);
-    const cvdData = bucketRows
+    const cvdData = flowRows
       .filter((bucket) => bucket.cvdMarket !== null)
       .map((bucket) => [bucket.time, signedLogNetTaker(bucket.cvdMarket), bucket.cvdMarket]);
-    const takerPressure30sData = buildTrailingTakerPressureData(bucketRows);
+    const takerPressure30sData = buildTrailingTakerPressureData(flowRows);
     const bookImbalanceData = bucketRows
       .filter((bucket) => bucket.bookImbalance !== null)
       .map((bucket) => [bucket.time, bucket.bookImbalance]);

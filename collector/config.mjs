@@ -5,8 +5,11 @@ const BINANCE_SPOT_BASE_URL = (process.env.BINANCE_SPOT_BASE_URL || "https://api
 const BINANCE_FUTURES_BASE_URL = (
   process.env.BINANCE_FUTURES_BASE_URL || "https://fapi.binance.com"
 ).replace(/\/+$/, "");
-const BINANCE_FUTURES_WS_BASE_URL = (
-  process.env.BINANCE_FUTURES_WS_BASE_URL || "wss://fstream.binance.com/stream"
+const BINANCE_FUTURES_PUBLIC_WS_BASE_URL = (
+  process.env.BINANCE_FUTURES_PUBLIC_WS_BASE_URL || "wss://fstream.binance.com/public/stream"
+).replace(/\/+$/, "");
+const BINANCE_FUTURES_MARKET_WS_BASE_URL = (
+  process.env.BINANCE_FUTURES_MARKET_WS_BASE_URL || "wss://fstream.binance.com/market/stream"
 ).replace(/\/+$/, "");
 const POLYMARKET_GAMMA_BASE_URL = (
   process.env.POLYMARKET_GAMMA_BASE_URL || "https://gamma-api.polymarket.com"
@@ -36,8 +39,9 @@ function buildUrl(baseUrl, path, params) {
   return `${baseUrl}${path}?${search.toString()}`;
 }
 
-function buildFuturesWebSocketUrl(streams) {
-  return `${BINANCE_FUTURES_WS_BASE_URL}?streams=${streams.join("/")}`;
+function buildFuturesWebSocketUrl(baseUrl, streams) {
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}streams=${streams.join("/")}`;
 }
 
 export const MARKET_MS = 5 * 60 * 1000;
@@ -169,9 +173,28 @@ export const FUTURES_MICROSTRUCTURE_SOURCE = {
 export const FUTURES_WEBSOCKET_SOURCE = {
   source: "binance_futures_ws",
   instrumentType: "futures",
-  streams: () => {
+  publicStreams: () => {
     const streamSymbol = SYMBOL.toLowerCase();
-    return [`${streamSymbol}@bookTicker`, `${streamSymbol}@forceOrder`];
+    return [`${streamSymbol}@bookTicker`];
   },
-  url: () => buildFuturesWebSocketUrl(FUTURES_WEBSOCKET_SOURCE.streams()),
+  marketStreams: () => {
+    const streamSymbol = SYMBOL.toLowerCase();
+    return [`${streamSymbol}@forceOrder`];
+  },
+  connections: () => [
+    {
+      name: "public",
+      url: buildFuturesWebSocketUrl(
+        BINANCE_FUTURES_PUBLIC_WS_BASE_URL,
+        FUTURES_WEBSOCKET_SOURCE.publicStreams()
+      ),
+    },
+    {
+      name: "market",
+      url: buildFuturesWebSocketUrl(
+        BINANCE_FUTURES_MARKET_WS_BASE_URL,
+        FUTURES_WEBSOCKET_SOURCE.marketStreams()
+      ),
+    },
+  ],
 };

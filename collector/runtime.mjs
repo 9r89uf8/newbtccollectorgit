@@ -32,6 +32,7 @@ import {
 import { writeMarketFeatureBuckets } from "./marketFeatureBuckets.mjs";
 import { writeMarketFeatures } from "./marketFeatures.mjs";
 import { writeMarketLabels } from "./marketLabels.mjs";
+import { writeMarketTradeFlow1s } from "./marketTradeFlow1s.mjs";
 import { writeMarketPositionFeatures } from "./marketPositionFeatures.mjs";
 import {
   collectPolymarketProbabilitySample,
@@ -185,9 +186,11 @@ async function collectScheduledData(market, scheduledAt, sampleType) {
 }
 
 export async function closeMarket(market) {
+  let aggTradeResult = null;
   let featureResult = null;
   let bucketResult = null;
   let cvdBucketResult = null;
+  let tradeFlowResult = null;
   let micropriceBucketResult = null;
   let positionResult = null;
   let basisResult = null;
@@ -200,7 +203,7 @@ export async function closeMarket(market) {
   let polymarketRefreshResult = null;
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
-    await collectFuturesAggregateTradesForMarket(market);
+    aggTradeResult = await collectFuturesAggregateTradesForMarket(market);
     if (ENABLE_FUTURES_POSITIONING) {
       basisResult = await collectFuturesBasisSamplesForMarket(market);
     }
@@ -239,6 +242,9 @@ export async function closeMarket(market) {
     if (ENABLE_FUTURES_WEBSOCKET_SUMMARIES) {
       micropriceBucketResult = await writeMarketMicropriceBuckets(market);
     }
+    tradeFlowResult = await writeMarketTradeFlow1s(market, {
+      bucketQuality: aggTradeResult?.ok && !aggTradeResult?.truncated ? "complete" : "partial",
+    });
     behaviorResult = await writeMarketBehaviorLabel(market);
     if (ENABLE_FUTURES_POSITIONING) {
       positionResult = await writeMarketPositionFeatures(market);
@@ -261,6 +267,9 @@ export async function closeMarket(market) {
     : "";
   const cvdBucketMessage = cvdBucketResult
     ? `; cvd ${cvdBucketResult.cvdBucketCount}`
+    : "";
+  const tradeFlowMessage = tradeFlowResult
+    ? `; trade flow 1s ${tradeFlowResult.tradeFlowBucketCount} ${tradeFlowResult.bucketQuality}`
     : "";
   const micropriceBucketMessage = micropriceBucketResult
     ? `; microprice ${micropriceBucketResult.micropriceBucketCount}`
@@ -311,7 +320,7 @@ export async function closeMarket(market) {
     COLLECTOR_NAME,
     "running",
     market.id,
-    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${cvdBucketMessage}${micropriceBucketMessage}${positionMessage}${basisMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${polymarketMessage}${micropriceRefreshMessage}${forwardRefreshMessage}${polymarketRefreshMessage}${incompleteMarkerMessage}`
+    `closed ${market.id} as ${status}${featureMessage}${bucketMessage}${cvdBucketMessage}${tradeFlowMessage}${micropriceBucketMessage}${positionMessage}${basisMessage}${behaviorMessage}${classificationMessage}${forwardMessage}${polymarketMessage}${micropriceRefreshMessage}${forwardRefreshMessage}${polymarketRefreshMessage}${incompleteMarkerMessage}`
   );
 }
 

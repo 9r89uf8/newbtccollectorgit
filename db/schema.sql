@@ -551,6 +551,54 @@ create index if not exists market_cvd_buckets_source_time_idx
 create index if not exists market_cvd_buckets_symbol_source_time_idx
   on market_cvd_buckets (symbol, source, bucket_start desc);
 
+create table if not exists market_trade_flow_1s (
+  market_id text not null references markets(id) on delete cascade,
+  source text not null,
+  symbol text not null,
+  bucket_start timestamptz not null,
+  bucket_end timestamptz not null,
+  bucket_seconds numeric(14, 3) not null default 1,
+  mid_price numeric(20, 8),
+  taker_buy_quote numeric(30, 8) not null default 0,
+  taker_sell_quote numeric(30, 8) not null default 0,
+  net_taker_quote numeric(30, 8) not null default 0,
+  gross_taker_quote numeric(30, 8) not null default 0,
+  taker_imbalance numeric(14, 8),
+  cvd_market_quote numeric(30, 8) not null default 0,
+  cvd_continuous_quote numeric(30, 8) not null default 0,
+  cvd_change_5s numeric(30, 8),
+  cvd_change_10s numeric(30, 8),
+  cvd_change_30s numeric(30, 8),
+  price_change_5s_bps numeric(14, 8),
+  price_change_10s_bps numeric(14, 8),
+  price_change_30s_bps numeric(14, 8),
+  rolling_net_5s numeric(30, 8) not null default 0,
+  rolling_net_10s numeric(30, 8) not null default 0,
+  rolling_net_30s numeric(30, 8) not null default 0,
+  rolling_gross_5s numeric(30, 8) not null default 0,
+  rolling_gross_10s numeric(30, 8) not null default 0,
+  rolling_gross_30s numeric(30, 8) not null default 0,
+  rolling_imbalance_5s numeric(14, 8),
+  rolling_imbalance_10s numeric(14, 8),
+  rolling_imbalance_30s numeric(14, 8),
+  large_buy_quote numeric(30, 8) not null default 0,
+  large_sell_quote numeric(30, 8) not null default 0,
+  large_trade_count integer not null default 0,
+  large_trade_threshold numeric(20, 8) not null,
+  max_trade_quote numeric(30, 8),
+  trade_count integer not null default 0,
+  bucket_quality text not null check (bucket_quality in ('complete', 'partial', 'missing')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (market_id, source, bucket_start)
+);
+
+create index if not exists market_trade_flow_1s_source_time_idx
+  on market_trade_flow_1s (source, bucket_start desc);
+
+create index if not exists market_trade_flow_1s_symbol_source_time_idx
+  on market_trade_flow_1s (symbol, source, bucket_start desc);
+
 create table if not exists market_microprice_buckets (
   market_id text not null references markets(id) on delete cascade,
   source text not null,

@@ -304,7 +304,7 @@ When futures microstructure collection is enabled, the collector can also subscr
 <symbol>@forceOrder
 ```
 
-The collector uses these messages only as transient input. It does not store raw WebSocket messages, raw liquidation events, or debug copies. It aggregates finalized UTC-aligned 1-second rows into `futures_ws_1s_summaries`.
+The collector subscribes to `@bookTicker` on Binance Futures `/public` and `@forceOrder` on `/market`. It uses these messages only as transient input. It does not store raw WebSocket messages, raw liquidation events, or debug copies. It aggregates finalized UTC-aligned 1-second rows into `futures_ws_1s_summaries`.
 
 Book-ticker summary fields include:
 
@@ -338,7 +338,7 @@ liquidation_max_quote
 
 The WebSocket summary table is the short-horizon prediction row source. It captures 1-second top-of-book movement and liquidation pressure without creating a raw market-data firehose.
 
-If no WebSocket message arrives for 20 seconds by default, the collector marks the current market `incomplete`, records a `websocket_no_messages` error, and closes any open WebSocket so the reconnect loop can create a fresh connection. This threshold is controlled by `FUTURES_WS_STALE_MS`.
+If no book-ticker message arrives for 20 seconds by default, the collector marks the current market `incomplete`, records a `websocket_no_messages` error, and closes the public WebSocket so the reconnect loop can create a fresh connection. This threshold is controlled by `FUTURES_WS_STALE_MS`.
 
 ## Forward Labels
 
@@ -630,6 +630,35 @@ cvd_divergence_5b
 
 Because futures aggregate trades are fetched after market close, this CVD is currently a post-market derived feature. A live CVD chart would require adding a Binance Futures trade stream such as aggTrade/trade.
 
+## One-Second Trade Flow Buckets
+
+After raw Binance Futures aggregate trades are collected, the collector also materializes `market_trade_flow_1s` with one row for each second in the 5 minute market. This table is derived from raw `agg_trades`, not from mixed-width feature buckets, so it has a uniform 300-row timeline per market.
+
+Each 1-second trade-flow row stores:
+
+```text
+taker_buy_quote
+taker_sell_quote
+net_taker_quote
+gross_taker_quote
+taker_imbalance
+cvd_market_quote
+cvd_continuous_quote
+cvd_change_5s / 10s / 30s
+price_change_5s_bps / 10s_bps / 30s_bps
+rolling_net_5s / 10s / 30s
+rolling_gross_5s / 10s / 30s
+rolling_imbalance_5s / 10s / 30s
+large_buy_quote
+large_sell_quote
+large_trade_count
+trade_count
+```
+
+`cvd_market_quote` resets at the start of each 5 minute market. `cvd_continuous_quote` uses the latest prior `market_trade_flow_1s` row as its seed. If older markets are backfilled or recomputed, later continuous CVD rows should be recomputed in chronological order.
+
+The market detail chart prefers this 1-second table for net-taker and CVD display when rows exist, falling back to `market_feature_buckets` and `market_cvd_buckets` for older markets.
+
 ## Main Tables
 
 | Table | Purpose |
@@ -648,6 +677,7 @@ Because futures aggregate trades are fetched after market close, this CVD is cur
 | `market_classifications` | Stores rule-based market classes, tags, confidence, version, and reasons. |
 | `market_feature_buckets` | Stores per-timestamp futures feature summaries inside each market. |
 | `market_cvd_buckets` | Stores per-timestamp cumulative volume delta derived from `market_feature_buckets`. |
+| `market_trade_flow_1s` | Stores uniform per-second taker flow, rolling flow windows, and CVD derived from raw `agg_trades`. |
 | `market_microprice_buckets` | Stores per-second top-of-book microprice pressure derived from `futures_ws_1s_summaries`. |
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
@@ -660,7 +690,7 @@ Because futures aggregate trades are fetched after market close, this CVD is cur
 - All market timestamps are UTC.
 - The configured symbol defaults to `BTCUSDT`.
 - Plain PostgreSQL is supported. TimescaleDB is optional.
-- `price_samples` and `book_samples` can become Timescale hypertables when TimescaleDB is installed.
+- `price_samples`, `book_samples`, and derived 1-second tables can become Timescale hypertables when TimescaleDB is installed.
 - Aggregate trades are kept as a plain PostgreSQL table because the uniqueness rule is `(source, symbol, agg_trade_id)`.
 - Futures microstructure collection is enabled by default and can be disabled with `ENABLE_FUTURES_MICROSTRUCTURE=false`.
 - Futures positioning and basis collection are enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.

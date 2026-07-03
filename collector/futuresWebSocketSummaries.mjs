@@ -260,6 +260,7 @@ function handleMessage(state, message) {
   const eventType = data.e;
 
   if (eventType === "bookTicker" || stream.endsWith("@bookTicker")) {
+    state.lastBookTickerAt = Date.now();
     handleBookTicker(state, data);
   } else if (eventType === "forceOrder" || stream.endsWith("@forceOrder")) {
     handleLiquidation(state, data);
@@ -374,7 +375,7 @@ async function markCurrentMarketIncompleteForNoMessages(state, nowMs = Date.now(
   if (state.lastNoMessageMarketId === market.id) return;
   state.lastNoMessageMarketId = market.id;
 
-  const message = `Binance futures WebSocket received no messages for ${Math.round(
+  const message = `Binance futures WebSocket received no bookTicker messages for ${Math.round(
     FUTURES_WS_STALE_MS / 1000
   )} seconds as of ${toIsoSeconds(new Date(nowMs))}; marking market incomplete`;
 
@@ -395,12 +396,14 @@ async function markCurrentMarketIncompleteForNoMessages(state, nowMs = Date.now(
 
 async function handleNoRecentMessages(state) {
   const nowMs = Date.now();
-  if (nowMs - state.lastMessageAt < FUTURES_WS_STALE_MS) return;
+  if (nowMs - state.lastBookTickerAt < FUTURES_WS_STALE_MS) return;
 
   await markCurrentMarketIncompleteForNoMessages(state, nowMs);
 
-  if (state.ws && state.ws.readyState === OPEN_STATE) {
-    state.ws.close(4000, "stale websocket");
+  for (const connection of state.connections) {
+    if (connection.name === "public" && connection.ws && connection.ws.readyState === OPEN_STATE) {
+      connection.ws.close(4000, "stale websocket");
+    }
   }
 }
 
@@ -423,20 +426,19 @@ async function flushDueBuckets(state, force = false) {
   }
 }
 
-function scheduleReconnect(state) {
-  if (state.stopped || state.reconnectTimer) return;
+function scheduleReconnect(state, connection) {
+  if (state.stopped || connection.reconnectTimer) return;
 
-  const delayMs = state.reconnectDelayMs;
-  state.reconnectDelayMs = Math.min(state.reconnectDelayMs * 2, FUTURES_WS_RECONNECT_MAX_MS);
-  state.reconnectTimer = setTimeout(() => {
-    state.reconnectTimer = null;
-    connect(state);
+  const delayMs = connection.reconnectDelayMs;
+  connection.reconnectDelayMs = Math.min(connection.reconnectDelayMs * 2, FUTURES_WS_RECONNECT_MAX_MS);
+  connection.reconnectTimer = setTimeout(() => {
+    connection.reconnectTimer = null;
+    connect(state, connection);
   }, delayMs);
-  state.reconnectTimer.unref?.();
+  connection.reconnectTimer.unref?.();
 }
 
-
-function connect(state) {
+function connect(state, connection) {
   if (state.stopped) return;
 
   if (!globalThis.WebSocket) {
@@ -444,11 +446,11 @@ function connect(state) {
     return;
   }
 
-  const ws = new globalThis.WebSocket(FUTURES_WEBSOCKET_SOURCE.url());
-  state.ws = ws;
+  const ws = new globalThis.WebSocket(connection.url);
+  connection.ws = ws;
 
   ws.addEventListener("open", () => {
-    state.reconnectDelayMs = FUTURES_WS_RECONNECT_INITIAL_MS;
+    connection.reconnectDelayMs = FUTURES_WS_RECONNECT_INITIAL_MS;
   });
 
   ws.addEventListener("message", (event) => {
@@ -456,23 +458,31 @@ function connect(state) {
     try {
       handleMessage(state, event.data);
     } catch (error) {
-      recordWebSocketError(state, "websocket_message_error", error.message || String(error));
+      recordWebSocketError(
+        state,
+        "websocket_message_error",
+        `${connection.name} connection: ${error.message || String(error)}`
+      );
     }
   });
 
   ws.addEventListener("error", () => {
-    recordWebSocketError(state, "websocket_error", "Binance futures WebSocket emitted an error");
+    recordWebSocketError(
+      state,
+      "websocket_error",
+      `Binance futures ${connection.name} WebSocket emitted an error`
+    );
   });
 
   ws.addEventListener("close", (event) => {
-    if (state.ws === ws) state.ws = null;
+    if (connection.ws === ws) connection.ws = null;
     if (!state.stopped) {
       recordWebSocketError(
         state,
         "websocket_closed",
-        `Binance futures WebSocket closed with code ${event.code || 0}`
+        `Binance futures ${connection.name} WebSocket closed with code ${event.code || 0}`
       );
-      scheduleReconnect(state);
+      scheduleReconnect(state, connection);
     }
   });
 }
@@ -481,16 +491,22 @@ export function startFuturesWebSocketSummaryCollector() {
   const state = {
     buckets: new Map(),
     flushTimer: null,
-    reconnectTimer: null,
-    reconnectDelayMs: FUTURES_WS_RECONNECT_INITIAL_MS,
+    connections: FUTURES_WEBSOCKET_SOURCE.connections().map((connection) => ({
+      ...connection,
+      reconnectTimer: null,
+      reconnectDelayMs: FUTURES_WS_RECONNECT_INITIAL_MS,
+      ws: null,
+    })),
     lastErrorRecordedAt: 0,
     lastMessageAt: Date.now(),
+    lastBookTickerAt: Date.now(),
     lastNoMessageMarketId: null,
     stopped: false,
-    ws: null,
   };
 
-  connect(state);
+  for (const connection of state.connections) {
+    connect(state, connection);
+  }
 
   state.flushTimer = setInterval(() => {
     flushDueBuckets(state).catch((error) => {
@@ -505,11 +521,13 @@ export function startFuturesWebSocketSummaryCollector() {
   return {
     async stop() {
       state.stopped = true;
-      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-      if (state.flushTimer) clearInterval(state.flushTimer);
-      if (state.ws && [OPEN_STATE, CLOSING_STATE].includes(state.ws.readyState)) {
-        state.ws.close(1000, "collector stopping");
+      for (const connection of state.connections) {
+        if (connection.reconnectTimer) clearTimeout(connection.reconnectTimer);
+        if (connection.ws && [OPEN_STATE, CLOSING_STATE].includes(connection.ws.readyState)) {
+          connection.ws.close(1000, "collector stopping");
+        }
       }
+      if (state.flushTimer) clearInterval(state.flushTimer);
       await flushDueBuckets(state, true);
     },
   };

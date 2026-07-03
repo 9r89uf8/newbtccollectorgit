@@ -844,6 +844,17 @@ export default async function MarketDetailPage({ params }) {
     book_imbalance_5bps: toChartNumber(bucket.book_imbalance_5bps),
     spread_bps: toChartNumber(bucket.spread_bps),
   }));
+  const chartTradeFlow1s = data.tradeFlow1s.map((bucket) => ({
+    bucket_start: bucket.bucket_start instanceof Date ? bucket.bucket_start.toISOString() : bucket.bucket_start,
+    bucket_end: bucket.bucket_end instanceof Date ? bucket.bucket_end.toISOString() : bucket.bucket_end,
+    gross_taker_quote: toChartNumber(bucket.gross_taker_quote),
+    net_taker_quote: toChartNumber(bucket.net_taker_quote),
+    cvd_market_quote: toChartNumber(bucket.cvd_market_quote),
+    taker_imbalance: toChartNumber(bucket.taker_imbalance),
+    rolling_net_30s: toChartNumber(bucket.rolling_net_30s),
+    rolling_gross_30s: toChartNumber(bucket.rolling_gross_30s),
+    rolling_imbalance_30s: toChartNumber(bucket.rolling_imbalance_30s),
+  }));
   const chartPositionSeries = data.positionSeries.map((sample) => ({
     time: sample.scheduled_at instanceof Date ? sample.scheduled_at.toISOString() : sample.scheduled_at,
     open_interest_quote: Number(sample.open_interest_quote),
@@ -928,6 +939,7 @@ export default async function MarketDetailPage({ params }) {
           marketEnd={data.market.end_time instanceof Date ? data.market.end_time.toISOString() : data.market.end_time}
           priceSeries={chartPriceSeries}
           buckets={chartBuckets}
+          tradeFlow1s={chartTradeFlow1s}
           positionSeries={chartPositionSeries}
           webSocketSummaries={chartWebSocketSummaries}
           micropriceBuckets={chartMicropriceBuckets}

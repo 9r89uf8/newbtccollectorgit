@@ -13,6 +13,7 @@ const DATA_TABLES = [
   "market_features",
   "market_position_features",
   "market_behavior_labels",
+  "market_trade_flow_1s",
   "market_microprice_buckets",
   "market_cvd_buckets",
   "market_feature_buckets",

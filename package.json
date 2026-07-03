@@ -12,6 +12,7 @@
     "db:clear-data": "node scripts/clearData.mjs",
     "features:backfill-buckets": "node scripts/backfillFeatureBuckets.mjs",
     "features:backfill-cvd": "node scripts/backfillCvdBuckets.mjs",
+    "features:backfill-trade-flow-1s": "node scripts/backfillTradeFlow1s.mjs",
     "features:backfill-microprice": "node scripts/backfillMicropriceBuckets.mjs",
     "labels:reconcile": "node scripts/reconcileMarketLabels.mjs"
   },

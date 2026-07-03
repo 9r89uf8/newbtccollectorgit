@@ -576,6 +576,23 @@ ask_depth_5bps
 
 The bucket table is derived from raw `agg_trades`, `book_samples`, and `price_samples`. Keep the raw tables because bucket logic can be recomputed later if the analysis window or feature definitions change.
 
+### Dashboard Taker Pressure Line
+
+`market_feature_buckets.taker_imbalance` is the raw per-bucket trade-flow ratio stored for analysis and recomputation. The dashboard imbalance panel does not plot that raw ratio as the main purple line because low-volume one-second buckets can jump between `-1` and `+1`.
+
+For display, the dashboard derives a trailing 30-second taker pressure line from the same bucket rows:
+
+```text
+rolling_net_30s = sum(net_taker_quote) over the trailing 30 seconds
+rolling_gross_30s = sum(total_volume_quote) over the trailing 30 seconds
+volume_floor = max(median positive bucket total_volume_quote, 50000)
+
+taker_pressure_30s = rolling_net_30s / max(rolling_gross_30s, volume_floor)
+```
+
+The calculation uses completed bucket end timestamps and only includes past bucket data, so it is safe for live-style charting and does not use future data. The plotted value is clamped to the same `-1` to `+1` range as raw imbalance, and the tooltip shows the trailing 30-second net and gross quote volume.
+
+This is currently a dashboard display transform, not a stored database column.
 ## Cumulative Volume Delta Buckets
 
 After `market_feature_buckets` is written, the collector derives one `market_cvd_buckets` row for each timestamp bucket. This table does not add a raw feed; it uses the existing bucket trade-flow delta:

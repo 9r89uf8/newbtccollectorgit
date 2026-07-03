@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
 
+const IMBALANCE_HELP_TOPIC_IDS = new Set(["takerImbalance", "bookImbalance", "spread"]);
+
 const HELP_TOPICS = [
   {
     id: "price",
@@ -39,7 +41,15 @@ const HELP_TOPICS = [
   {
     id: "takerImbalance",
     label: "Taker imbalance",
-    text: "Normalized aggressive flow: (taker buy quote - taker sell quote) / total taker quote. Values near +1 are buy-dominated; values near -1 are sell-dominated.",
+    text: "Taker imbalance measures aggressive executed trades: market buys crossing the spread versus market sells crossing the spread.",
+    details: [
+      "A taker executes immediately: a market buy hits the ask; a market sell hits the bid.",
+      "Formula: (market buy volume - market sell volume) / (market buy volume + market sell volume). Range: -1 to +1.",
+      "Example: 120 BTC market buys and 80 BTC market sells gives +0.20, meaning buyers were more aggressive during that window.",
+      "Positive usually means aggressive buying pressure; negative means aggressive selling pressure.",
+      "The purple chart line uses trailing 30-second net taker quote divided by trailing 30-second gross taker quote, with a volume floor to damp tiny +1/-1 buckets.",
+      "Read it with book imbalance and price response. Strong taker pressure with little price movement can mean passive liquidity is absorbing the flow.",
+    ],
   },
   {
     id: "microprice",
@@ -55,7 +65,14 @@ const HELP_TOPICS = [
   {
     id: "bookImbalance",
     label: "Book imbalance",
-    text: "Near-price liquidity balance inside 5 bps: (bid depth - ask depth) / (bid depth + ask depth). Positive means more bid liquidity; negative means more ask liquidity.",
+    text: "Book imbalance measures resting liquidity displayed in the order book, comparing bid depth versus ask depth near the current price.",
+    details: [
+      "Formula: (bid depth - ask depth) / (bid depth + ask depth). Range: -1 to +1.",
+      "Example: 500 BTC bid depth and 300 BTC ask depth gives +0.25, meaning more visible buy-side liquidity near price.",
+      "Positive often suggests support below price or thinner ask resistance; negative suggests more sell-side liquidity above price or weaker bid support.",
+      "Book imbalance is displayed liquidity, not executed flow. Limit orders can be canceled, moved, or spoofed quickly.",
+      "Combined read: taker+/book+ is stronger bullish pressure; taker-/book- is stronger bearish pressure; taker+/book- can mean asks absorbing buys; taker-/book+ can mean bids absorbing sells.",
+    ],
   },
   {
     id: "spread",
@@ -193,6 +210,8 @@ function finiteNumber(value) {
 }
 
 const NET_TAKER_LOG_BASE = 10000;
+const TAKER_PRESSURE_WINDOW_MS = 30 * 1000;
+const TAKER_PRESSURE_MIN_DENOMINATOR_QUOTE = 50_000;
 
 function signedLogNetTaker(value) {
   const number = finiteNumber(value);
@@ -204,6 +223,60 @@ function invertSignedLogNetTaker(value) {
   const number = finiteNumber(value);
   if (number === null) return null;
   return Math.sign(number) * NET_TAKER_LOG_BASE * (10 ** Math.abs(number) - 1);
+}
+
+function medianPositive(values) {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle];
+  return (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function buildTrailingTakerPressureData(bucketRows) {
+  const rows = bucketRows
+    .map((bucket) => ({
+      time: bucket.endTime ?? bucket.time,
+      net: finiteNumber(bucket.netTaker) ?? 0,
+      gross: Math.max(finiteNumber(bucket.grossTaker) ?? 0, 0),
+    }))
+    .filter((bucket) => bucket.time !== null)
+    .sort((a, b) => a.time - b.time);
+
+  const volumeFloor = Math.max(
+    medianPositive(rows.map((bucket) => bucket.gross)) ?? 0,
+    TAKER_PRESSURE_MIN_DENOMINATOR_QUOTE
+  );
+  const data = [];
+  let windowStart = 0;
+  let rollingNet = 0;
+  let rollingGross = 0;
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const bucket = rows[index];
+    rollingNet += bucket.net;
+    rollingGross += bucket.gross;
+
+    const cutoff = bucket.time - TAKER_PRESSURE_WINDOW_MS;
+    while (windowStart <= index && rows[windowStart].time <= cutoff) {
+      rollingNet -= rows[windowStart].net;
+      rollingGross -= rows[windowStart].gross;
+      windowStart += 1;
+    }
+
+    const denominator = Math.max(rollingGross, volumeFloor);
+    const pressure = denominator > 0 ? rollingNet / denominator : null;
+    data.push([
+      bucket.time,
+      pressure === null ? null : Math.max(-1, Math.min(1, pressure)),
+      rollingNet,
+      rollingGross,
+    ]);
+  }
+
+  return data;
 }
 
 function buildTooltip(params) {
@@ -250,7 +323,9 @@ function buildTooltip(params) {
       ${row("Pressure sum", "Microprice pressure", (value) => formatDecimal(value, 1))}
       ${detailText("Behavior", "Microprice pressure", 2)}
       ${row("Net liquidation", "Net liquidation", formatCompactUsd, 2)}
-      ${row("Taker imbalance", "Taker imbalance", (value) => formatDecimal(value, 3))}
+      ${row("Taker 30s", "Taker pressure 30s", (value) => formatDecimal(value, 3))}
+      ${detail("30s net", "Taker pressure 30s", 2, formatCompactUsd)}
+      ${detail("30s gross", "Taker pressure 30s", 3, formatCompactUsd)}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
       ${row("Microprice 10s", "Microprice 10s", (value) => formatDecimal(value, 3))}
       ${row("Microprice 30s", "Microprice 30s", (value) => formatDecimal(value, 3))}
@@ -278,8 +353,10 @@ export default function MarketMicrostructureChart({
   polymarketProbabilities = [],
 }) {
   const chartRef = useRef(null);
-  const [activeHelpId, setActiveHelpId] = useState(null);
-  const activeHelp = HELP_TOPICS.find((topic) => topic.id === activeHelpId);
+  const [activeTopHelpId, setActiveTopHelpId] = useState(null);
+  const [activeImbalanceHelpId, setActiveImbalanceHelpId] = useState(null);
+  const activeTopHelp = HELP_TOPICS.find((topic) => topic.id === activeTopHelpId);
+  const activeImbalanceHelp = HELP_TOPICS.find((topic) => topic.id === activeImbalanceHelpId);
 
   const option = useMemo(() => {
     const priceData = priceSeries
@@ -288,7 +365,9 @@ export default function MarketMicrostructureChart({
     const bucketRows = buckets
       .map((bucket) => ({
         time: toTimeValue(bucket.bucket_start),
+        endTime: toTimeValue(bucket.bucket_end),
         netTaker: finiteNumber(bucket.net_taker_quote),
+        grossTaker: finiteNumber(bucket.total_volume_quote),
         cvdMarket: finiteNumber(bucket.cvd_market_quote),
         takerImbalance: finiteNumber(bucket.taker_imbalance),
         bookImbalance: finiteNumber(bucket.book_imbalance_5bps),
@@ -340,9 +419,7 @@ export default function MarketMicrostructureChart({
     const cvdData = bucketRows
       .filter((bucket) => bucket.cvdMarket !== null)
       .map((bucket) => [bucket.time, signedLogNetTaker(bucket.cvdMarket), bucket.cvdMarket]);
-    const takerImbalanceData = bucketRows
-      .filter((bucket) => bucket.takerImbalance !== null)
-      .map((bucket) => [bucket.time, bucket.takerImbalance]);
+    const takerPressure30sData = buildTrailingTakerPressureData(bucketRows);
     const bookImbalanceData = bucketRows
       .filter((bucket) => bucket.bookImbalance !== null)
       .map((bucket) => [bucket.time, bucket.bookImbalance]);
@@ -405,13 +482,28 @@ export default function MarketMicrostructureChart({
       animation: false,
       backgroundColor: "#fbfcfe",
       color: ["#175cd3", "#344054", "#067647", "#c11574", "#7a5af8", "#16b364", "#b54708", "#f79009", "#667085", "#0e7490", "#c11574", "#475467", "#155eef"],
-      legend: {
-        top: 6,
-        left: 10,
-        itemWidth: 12,
-        itemHeight: 8,
-        textStyle: { color: "#475467", fontSize: 12 },
-      },
+      legend: [
+        {
+          top: 6,
+          left: 10,
+          itemWidth: 12,
+          itemHeight: 8,
+          textStyle: { color: "#475467", fontSize: 12 },
+        },
+        {
+          data: [
+            { name: "Taker pressure 30s", itemStyle: { color: "#7a5af8" } },
+            { name: "Book imbalance", itemStyle: { color: "#067647" } },
+            { name: "Spread", itemStyle: { color: "#b54708" } },
+          ],
+          top: 612,
+          left: 170,
+          icon: "rect",
+          itemWidth: 24,
+          itemHeight: 4,
+          textStyle: { color: "#475467", fontSize: 12 },
+        },
+      ],
       tooltip: {
         trigger: "axis",
         axisPointer: { type: "cross", link: [{ xAxisIndex: "all" }] },
@@ -438,9 +530,9 @@ export default function MarketMicrostructureChart({
         { left: 78, right: 132, top: 58, height: 165 },
         { left: 78, right: 132, top: 290, height: 105 },
         { left: 78, right: 132, top: 455, height: 105 },
-        { left: 78, right: 132, top: 620, height: 110 },
-        { left: 78, right: 132, top: 790, height: 110 },
-        { left: 78, right: 132, top: 960, height: 190 },
+        { left: 78, right: 132, top: 660, height: 110 },
+        { left: 78, right: 132, top: 845, height: 110 },
+        { left: 78, right: 132, top: 1015, height: 190 },
       ],
       xAxis: [0, 1, 2, 3, 4, 5].map((gridIndex) => ({
         type: "time",
@@ -674,13 +766,14 @@ export default function MarketMicrostructureChart({
           },
         },
         {
-          name: "Taker imbalance",
+          name: "Taker pressure 30s",
           type: "line",
           xAxisIndex: 3,
           yAxisIndex: 3,
-          data: takerImbalanceData,
+          data: takerPressure30sData,
           showSymbol: false,
           lineStyle: { color: "#7a5af8", width: 1.8 },
+          itemStyle: { color: "#7a5af8" },
         },
         {
           name: "Book imbalance",
@@ -690,6 +783,7 @@ export default function MarketMicrostructureChart({
           data: bookImbalanceData,
           showSymbol: false,
           lineStyle: { color: "#067647", width: 1.8 },
+          itemStyle: { color: "#067647" },
         },
 
         {
@@ -718,6 +812,7 @@ export default function MarketMicrostructureChart({
           data: spreadData,
           showSymbol: false,
           lineStyle: { color: "#b54708", width: 1.5, type: "dashed" },
+          itemStyle: { color: "#b54708" },
         },
         {
           name: "WS spread",
@@ -794,29 +889,35 @@ export default function MarketMicrostructureChart({
     return <p className="muted">No price series for this market.</p>;
   }
 
+  const topHelpTopics = HELP_TOPICS.filter((topic) => !IMBALANCE_HELP_TOPIC_IDS.has(topic.id));
+  const imbalanceHelpTopics = HELP_TOPICS.filter((topic) => IMBALANCE_HELP_TOPIC_IDS.has(topic.id));
+
   return (
     <>
       <div className="chart-help-row" aria-label="Chart glossary">
-        {HELP_TOPICS.map((topic) => (
+        {topHelpTopics.map((topic) => (
           <button
             type="button"
-            className={`chart-help-button ${activeHelpId === topic.id ? "chart-help-button-active" : ""}`}
+            className={`chart-help-button ${activeTopHelpId === topic.id ? "chart-help-button-active" : ""}`}
             key={topic.id}
-            onClick={() => setActiveHelpId(activeHelpId === topic.id ? null : topic.id)}
-            aria-expanded={activeHelpId === topic.id}
+            onClick={() => {
+              setActiveImbalanceHelpId(null);
+              setActiveTopHelpId(activeTopHelpId === topic.id ? null : topic.id);
+            }}
+            aria-expanded={activeTopHelpId === topic.id}
           >
             <span>{topic.label}</span>
             <b>?</b>
           </button>
         ))}
       </div>
-      {activeHelp ? (
+      {activeTopHelp ? (
         <div className="chart-help-note" role="note">
-          <strong>{activeHelp.label}</strong>
-          <p>{activeHelp.text}</p>
-          {activeHelp.details ? (
+          <strong>{activeTopHelp.label}</strong>
+          <p>{activeTopHelp.text}</p>
+          {activeTopHelp.details ? (
             <ul>
-              {activeHelp.details.map((detail) => (
+              {activeTopHelp.details.map((detail) => (
                 <li key={detail}>{detail}</li>
               ))}
             </ul>
@@ -824,7 +925,39 @@ export default function MarketMicrostructureChart({
         </div>
       ) : null}
       <div className="echarts-scroll">
-        <div className="echarts-market-chart" ref={chartRef} />
+        <div className="echarts-chart-stage">
+          <div className="imbalance-panel-help-row" aria-label="Imbalance panel glossary">
+            {imbalanceHelpTopics.map((topic) => (
+              <button
+                type="button"
+                className={`chart-help-button chart-help-button-compact ${activeImbalanceHelpId === topic.id ? "chart-help-button-active" : ""}`}
+                key={topic.id}
+                onClick={() => {
+                  setActiveTopHelpId(null);
+                  setActiveImbalanceHelpId(activeImbalanceHelpId === topic.id ? null : topic.id);
+                }}
+                aria-expanded={activeImbalanceHelpId === topic.id}
+              >
+                <span>{topic.label}</span>
+                <b>?</b>
+              </button>
+            ))}
+          </div>
+          {activeImbalanceHelp ? (
+            <div className="chart-help-note imbalance-panel-help-note" role="note">
+              <strong>{activeImbalanceHelp.label}</strong>
+              <p>{activeImbalanceHelp.text}</p>
+              {activeImbalanceHelp.details ? (
+                <ul>
+                  {activeImbalanceHelp.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="echarts-market-chart" ref={chartRef} />
+        </div>
       </div>
     </>
   );

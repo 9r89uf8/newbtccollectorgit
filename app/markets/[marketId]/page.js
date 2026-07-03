@@ -822,6 +822,8 @@ export default async function MarketDetailPage({ params }) {
   };
   const chartBuckets = data.buckets.map((bucket) => ({
     bucket_start: bucket.bucket_start instanceof Date ? bucket.bucket_start.toISOString() : bucket.bucket_start,
+    bucket_end: bucket.bucket_end instanceof Date ? bucket.bucket_end.toISOString() : bucket.bucket_end,
+    total_volume_quote: toChartNumber(bucket.total_volume_quote),
     net_taker_quote: toChartNumber(bucket.net_taker_quote),
     cvd_market_quote: toChartNumber(bucket.cvd_market_quote),
     taker_imbalance: toChartNumber(bucket.taker_imbalance),

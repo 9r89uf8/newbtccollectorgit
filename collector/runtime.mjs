@@ -70,7 +70,7 @@ let stopping = false;
 let futuresWebSocketCollector = null;
 let polymarketChainlinkBtcPriceCollector = null;
 const ensuredBoundaryCloseStarts = new Set();
-const BOUNDARY_CLOSE_GRACE_MS = 5000;
+const BOUNDARY_CLOSE_GRACE_MS = 15000;
 const pendingMarketClosures = new Map();
 
 async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {

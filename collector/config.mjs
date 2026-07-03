@@ -17,6 +17,11 @@ const POLYMARKET_GAMMA_BASE_URL = (
 const POLYMARKET_CLOB_BASE_URL = (
   process.env.POLYMARKET_CLOB_BASE_URL || "https://clob.polymarket.com"
 ).replace(/\/+$/, "");
+const POLYMARKET_RTDS_WS_URL = (
+  process.env.POLYMARKET_RTDS_WS_URL || "wss://ws-live-data.polymarket.com"
+).replace(/\/+$/, "");
+const POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL =
+  process.env.POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL || "btc/usd";
 
 function readPositiveNumber(name, fallback) {
   const value = Number(process.env[name] || fallback);
@@ -58,6 +63,19 @@ export const COLLECTOR_NAME = process.env.COLLECTOR_NAME || "btc-price-collector
 export const SYMBOL = process.env.COLLECTOR_SYMBOL || "BTCUSDT";
 export const REQUEST_TIMEOUT_MS = readPositiveNumber("BINANCE_TIMEOUT_MS", 4000);
 export const POLYMARKET_TIMEOUT_MS = readPositiveNumber("POLYMARKET_TIMEOUT_MS", REQUEST_TIMEOUT_MS);
+export const POLYMARKET_RTDS_PING_INTERVAL_MS = readPositiveNumber(
+  "POLYMARKET_RTDS_PING_INTERVAL_MS",
+  5000
+);
+export const POLYMARKET_RTDS_RECONNECT_INITIAL_MS = readPositiveNumber(
+  "POLYMARKET_RTDS_RECONNECT_INITIAL_MS",
+  1000
+);
+export const POLYMARKET_RTDS_RECONNECT_MAX_MS = readPositiveNumber(
+  "POLYMARKET_RTDS_RECONNECT_MAX_MS",
+  30000
+);
+export const POLYMARKET_RTDS_STALE_MS = readPositiveNumber("POLYMARKET_RTDS_STALE_MS", 15000);
 export const POLYMARKET_METADATA_PREFETCH_LEAD_MS = readPositiveNumber(
   "POLYMARKET_METADATA_PREFETCH_LEAD_MS",
   60_000
@@ -72,6 +90,10 @@ export const ENABLE_FUTURES_WEBSOCKET_SUMMARIES = readBoolean(
   true
 );
 export const ENABLE_POLYMARKET_BTC_5M = readBoolean("ENABLE_POLYMARKET_BTC_5M", true);
+export const ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE = readBoolean(
+  "ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE",
+  true
+);
 export const POSITION_SAMPLE_INTERVAL_MS = 5 * 1000;
 export const EXPECTED_POSITION_SAMPLES_PER_MARKET =
   MARKET_MS / POSITION_SAMPLE_INTERVAL_MS;
@@ -127,6 +149,26 @@ export const POLYMARKET_5M_BTC_SOURCE = {
   gammaMarketBySlugUrl: (slug) =>
     `${POLYMARKET_GAMMA_BASE_URL}/markets/slug/${encodeURIComponent(slug)}`,
   midpointsUrl: () => `${POLYMARKET_CLOB_BASE_URL}/midpoints`,
+};
+
+export const POLYMARKET_RTDS_CHAINLINK_BTC_SOURCE = {
+  source: "polymarket_rtds_chainlink",
+  instrumentType: "oracle",
+  symbol: "BTCUSD",
+  topic: "crypto_prices_chainlink",
+  rtdsSymbol: POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL,
+  feedId: `crypto_prices_chainlink:${POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL}`,
+  url: POLYMARKET_RTDS_WS_URL,
+  subscription: () => ({
+    action: "subscribe",
+    subscriptions: [
+      {
+        topic: "crypto_prices_chainlink",
+        type: "*",
+        filters: JSON.stringify({ symbol: POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL }),
+      },
+    ],
+  }),
 };
 
 export const FUTURES_MICROSTRUCTURE_SOURCE = {

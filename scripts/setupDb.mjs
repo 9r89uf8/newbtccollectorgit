@@ -12,6 +12,7 @@ const hypertables = [
   { table: "derivative_position_samples", timeColumn: "scheduled_at" },
   { table: "futures_basis_samples", timeColumn: "basis_time" },
   { table: "polymarket_probability_samples", timeColumn: "scheduled_at" },
+  { table: "chainlink_btc_price_samples", timeColumn: "scheduled_at" },
   { table: "futures_ws_1s_summaries", timeColumn: "bucket_start" },
   { table: "market_forward_labels", timeColumn: "bucket_start" },
   { table: "market_trade_flow_1s", timeColumn: "bucket_start" },

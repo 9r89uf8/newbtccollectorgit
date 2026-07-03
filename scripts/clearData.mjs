@@ -8,6 +8,7 @@ const CONFIRMATION = "DELETE_ALL_MARKET_DATA";
 const DATA_TABLES = [
   "market_forward_labels",
   "polymarket_probability_samples",
+  "chainlink_btc_price_samples",
   "polymarket_5m_btc_markets",
   "market_labels",
   "market_features",

@@ -235,6 +235,56 @@ create index if not exists polymarket_probability_samples_slug_time_idx
 
 create index if not exists polymarket_probability_samples_market_idx
   on polymarket_probability_samples (market_id, scheduled_at);
+
+create table if not exists chainlink_btc_price_samples (
+  source text not null default 'polymarket_rtds_chainlink',
+  instrument_type text not null default 'oracle',
+  symbol text not null,
+  market_id text not null references markets(id) on delete cascade,
+  feed_id text not null,
+  topic text not null default 'crypto_prices_chainlink',
+  rtds_symbol text not null default 'btc/usd',
+  scheduled_at timestamptz not null,
+  collected_at timestamptz not null default now(),
+  sample_type text not null check (sample_type in ('normal', 'final_ramp', 'close')),
+  price numeric(20, 8),
+  bid numeric(20, 8),
+  ask numeric(20, 8),
+  valid_from_timestamp timestamptz,
+  observations_timestamp timestamptz,
+  price_timestamp timestamptz,
+  server_timestamp timestamptz,
+  expires_at timestamptz,
+  native_fee text,
+  link_fee text,
+  request_latency_ms integer,
+  report_latency_ms integer,
+  tick_age_ms integer,
+  quality text not null default 'missing' check (quality in ('complete', 'partial', 'missing')),
+  decode_status text not null default 'missing' check (decode_status in ('decoded', 'raw_only', 'missing')),
+  raw_response jsonb,
+  full_report text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (source, market_id, scheduled_at)
+);
+
+alter table chainlink_btc_price_samples
+  alter column source set default 'polymarket_rtds_chainlink';
+
+alter table chainlink_btc_price_samples
+  add column if not exists topic text not null default 'crypto_prices_chainlink',
+  add column if not exists rtds_symbol text not null default 'btc/usd',
+  add column if not exists price_timestamp timestamptz,
+  add column if not exists server_timestamp timestamptz,
+  add column if not exists tick_age_ms integer;
+
+create index if not exists chainlink_btc_price_samples_symbol_source_time_idx
+  on chainlink_btc_price_samples (symbol, source, scheduled_at desc);
+
+create index if not exists chainlink_btc_price_samples_market_idx
+  on chainlink_btc_price_samples (market_id, scheduled_at);
+
 create table if not exists futures_ws_1s_summaries (
   source text not null,
   instrument_type text not null,

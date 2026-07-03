@@ -1,6 +1,7 @@
 import { closePool } from "../lib/db.js";
 import {
   COLLECTOR_NAME,
+  ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE,
   ENABLE_FUTURES_MICROSTRUCTURE,
   ENABLE_FUTURES_POSITIONING,
   ENABLE_FUTURES_WEBSOCKET_SUMMARIES,
@@ -12,6 +13,11 @@ import {
 } from "./config.mjs";
 import { collectFuturesAggregateTradesForMarket } from "./aggTrades.mjs";
 import { collectFuturesBookSample } from "./bookSamples.mjs";
+import {
+  collectPolymarketChainlinkBtcPriceSample,
+  collectPolymarketChainlinkBtcPriceSamples,
+  startPolymarketChainlinkBtcPriceCollector,
+} from "./chainlinkBtcSamples.mjs";
 import {
   collectFuturesPositionSample,
   shouldCollectFuturesPositionSample,
@@ -61,6 +67,7 @@ import {
 
 let stopping = false;
 let futuresWebSocketCollector = null;
+let polymarketChainlinkBtcPriceCollector = null;
 const pendingMarketClosures = new Map();
 
 async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {
@@ -121,6 +128,22 @@ async function collectNextMarketOpeningPolymarketSample(market, scheduledAt) {
   return collectPolymarketProbabilitySample(nextMarket, scheduledAt, "normal");
 }
 
+async function collectScheduledPolymarketChainlinkBtcPriceSamples(market, scheduledAt, sampleType) {
+  if (sampleType !== "close" || scheduledAt.getTime() !== market.endMs) {
+    return collectPolymarketChainlinkBtcPriceSample(market, scheduledAt, sampleType);
+  }
+
+  const nextMarket = getNextMarketAfter(market);
+  await upsertMarket(nextMarket);
+  return collectPolymarketChainlinkBtcPriceSamples(
+    [
+      { market, sampleType: "close" },
+      { market: nextMarket, sampleType: "normal" },
+    ],
+    scheduledAt
+  );
+}
+
 function scheduleMarketClose(market) {
   const existing = pendingMarketClosures.get(market.id);
   if (existing) return existing;
@@ -156,6 +179,10 @@ async function collectScheduledData(market, scheduledAt, sampleType) {
     if (sampleType === "close") {
       tasks.push(collectNextMarketOpeningPolymarketSample(market, scheduledAt));
     }
+  }
+
+  if (ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE) {
+    tasks.push(collectScheduledPolymarketChainlinkBtcPriceSamples(market, scheduledAt, sampleType));
   }
 
   if (ENABLE_FUTURES_MICROSTRUCTURE) {
@@ -344,6 +371,10 @@ export async function runCollector() {
     futuresWebSocketCollector = startFuturesWebSocketSummaryCollector();
   }
 
+  if (ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE && !polymarketChainlinkBtcPriceCollector) {
+    polymarketChainlinkBtcPriceCollector = startPolymarketChainlinkBtcPriceCollector();
+  }
+
   await closeDueMarkets();
   if (ENABLE_POLYMARKET_BTC_5M) {
     try {
@@ -396,6 +427,10 @@ export async function shutdown(signal) {
     if (futuresWebSocketCollector) {
       await futuresWebSocketCollector.stop();
       futuresWebSocketCollector = null;
+    }
+    if (polymarketChainlinkBtcPriceCollector) {
+      await polymarketChainlinkBtcPriceCollector.stop();
+      polymarketChainlinkBtcPriceCollector = null;
     }
     await heartbeat(COLLECTOR_NAME, "stopped", null, `stopped by ${signal}`);
   } finally {

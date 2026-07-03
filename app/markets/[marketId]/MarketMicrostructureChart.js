@@ -16,9 +16,9 @@ const HELP_TOPICS = [
     text: "The Binance Futures BTCUSDT last price sampled during this 5 minute market.",
   },
   {
-    id: "wsMid",
-    label: "WS mid",
-    text: "One-second Binance Futures WebSocket mid price from the best bid and best ask. It fills the gaps between REST price samples.",
+    id: "chainlinkPrice",
+    label: "Chainlink BTC",
+    text: "Polymarket's Chainlink BTC/USD reference price sampled during this market, with Gamma start and final settlement prices used as the fallback when live samples are unavailable.",
   },
   {
     id: "netTaker",
@@ -331,10 +331,7 @@ function buildTooltip(params) {
     <div style="min-width:260px">
       <div style="font-weight:700;margin-bottom:6px">${formatUtc(time)}</div>
       ${row("BTC price", "BTC price", formatPrice)}
-      ${row("WS mid", "WS mid", formatPrice)}
-      ${detail("Mid moves", "WS mid", 3, formatCount)}
-      ${detail("Microprice dev", "WS mid", 4, formatBps)}
-      ${detail("Event lag", "WS mid", 5, formatMilliseconds)}
+      ${row("Chainlink BTC", "Chainlink BTC", formatPrice)}
       ${row("Net taker", "Net taker", formatCompactUsd, 2)}
       ${row("CVD", "CVD", formatCompactUsd, 2)}
       ${row("Pressure sum", "Microprice pressure", (value) => formatDecimal(value, 1))}
@@ -366,6 +363,7 @@ export default function MarketMicrostructureChart({
   webSocketSummaries = [],
   micropriceBuckets = [],
   polymarketProbabilities = [],
+  chainlinkPriceSeries = [],
 }) {
   const chartRef = useRef(null);
   const [activeTopHelpId, setActiveTopHelpId] = useState(null);
@@ -381,6 +379,9 @@ export default function MarketMicrostructureChart({
 
   const option = useMemo(() => {
     const priceData = priceSeries
+      .map((sample) => [toTimeValue(sample.time), finiteNumber(sample.price)])
+      .filter(([time, price]) => time !== null && price !== null);
+    const chainlinkPriceData = chainlinkPriceSeries
       .map((sample) => [toTimeValue(sample.time), finiteNumber(sample.price)])
       .filter(([time, price]) => time !== null && price !== null);
     const bucketRows = buckets
@@ -472,16 +473,6 @@ export default function MarketMicrostructureChart({
     const premiumData = positionRows
       .filter((sample) => sample.premiumBps !== null)
       .map((sample) => [sample.time, sample.premiumBps]);
-    const wsMidData = webSocketRows
-      .filter((summary) => summary.midPrice !== null)
-      .map((summary) => [
-        summary.time,
-        summary.midPrice,
-        summary.bookTickerUpdateCount,
-        summary.midPriceMoveCount,
-        summary.micropriceBpsFromMid,
-        summary.avgEventLagMs,
-      ]);
     const wsSpreadData = webSocketRows
       .filter((summary) => summary.spreadAvg !== null)
       .map((summary) => [summary.time, summary.spreadAvg, summary.spreadMax]);
@@ -758,13 +749,16 @@ export default function MarketMicrostructureChart({
           emphasis: { focus: "series" },
         },
         {
-          name: "WS mid",
+          name: "Chainlink BTC",
           type: "line",
           xAxisIndex: 0,
           yAxisIndex: 0,
-          data: wsMidData,
-          showSymbol: false,
-          lineStyle: { color: "#344054", width: 1.35 },
+          data: chainlinkPriceData,
+          showSymbol: true,
+          symbolSize: 6,
+          connectNulls: true,
+          lineStyle: { color: "#f79009", width: 1.8, type: "dashed" },
+          itemStyle: { color: "#f79009" },
           emphasis: { focus: "series" },
         },
         {
@@ -930,7 +924,7 @@ export default function MarketMicrostructureChart({
         },
       ],
     };
-  }, [buckets, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, tradeFlow1s, webSocketSummaries]);
+  }, [buckets, chainlinkPriceSeries, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, tradeFlow1s, webSocketSummaries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;

@@ -970,6 +970,19 @@ export default async function MarketDetailPage({ params }) {
     up_probability: toChartNumber(sample.up_probability),
     down_probability: toChartNumber(sample.down_probability),
   }));
+  const marketStartIso = data.market.start_time instanceof Date ? data.market.start_time.toISOString() : data.market.start_time;
+  const marketEndIso = data.market.end_time instanceof Date ? data.market.end_time.toISOString() : data.market.end_time;
+  const sampledChainlinkPriceSeries = data.chainlinkPriceSeries.map((sample) => ({
+    time: sample.scheduled_at,
+    price: toChartNumber(sample.price),
+  })).filter((sample) => sample.price !== null);
+  const settlementChainlinkPriceSeries = [
+    { time: marketStartIso, price: toChartNumber(data.market.polymarket_open_price) },
+    { time: marketEndIso, price: toChartNumber(data.market.polymarket_close_price) },
+  ].filter((sample) => sample.price !== null);
+  const chartChainlinkPriceSeries = sampledChainlinkPriceSeries.length > 0
+    ? sampledChainlinkPriceSeries
+    : settlementChainlinkPriceSeries;
 
   return (
     <main className="dashboard-shell market-detail-shell">
@@ -1011,14 +1024,14 @@ export default async function MarketDetailPage({ params }) {
       <section className="panel chart-panel detail-wide-panel">
         <div className="panel-heading">
           <div>
-            <p className="panel-label">BTC futures price</p>
-            <h2>Price, CVD, taker flow, microprice, WebSocket liquidity, spread, and positioning</h2>
+            <p className="panel-label">BTC price references</p>
+            <h2>Binance Futures price, Chainlink BTC, CVD, taker flow, microprice, WebSocket liquidity, spread, and positioning</h2>
           </div>
           <span className="status-pill status-muted">{chartPriceSeries.length} samples</span>
         </div>
         <MarketMicrostructureChart
-          marketStart={data.market.start_time instanceof Date ? data.market.start_time.toISOString() : data.market.start_time}
-          marketEnd={data.market.end_time instanceof Date ? data.market.end_time.toISOString() : data.market.end_time}
+          marketStart={marketStartIso}
+          marketEnd={marketEndIso}
           priceSeries={chartPriceSeries}
           buckets={chartBuckets}
           tradeFlow1s={chartTradeFlow1s}
@@ -1026,6 +1039,7 @@ export default async function MarketDetailPage({ params }) {
           webSocketSummaries={chartWebSocketSummaries}
           micropriceBuckets={chartMicropriceBuckets}
           polymarketProbabilities={chartPolymarketProbabilities}
+          chainlinkPriceSeries={chartChainlinkPriceSeries}
         />
       </section>
 

@@ -20,11 +20,12 @@ It records these data families.
 | Top-100 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=100` | Derived top-of-book and depth metrics at each scheduled sample time. |
 | Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, mark/index basis, funding, and current open interest on a 5 second cadence. |
 | Futures basis | `binance_futures` | `futures` | `/futures/data/basis` | Binance 5 minute basis, basis rate, futures price, and index price for `PERPETUAL` by default. |
-| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata, Polymarket Chainlink BTC reference prices, and paired Up/Down midpoint probabilities. |
+| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata, Gamma settlement Chainlink BTC prices, and paired Up/Down midpoint probabilities. |
+| Chainlink BTC reference | `polymarket_rtds_chainlink` | `oracle` | RTDS `crypto_prices_chainlink` WebSocket topic | Polymarket-provided BTC/USD Chainlink reference ticks sampled on the market cadence. |
 | Top-of-book updates | `binance_futures_ws` | `futures` | WebSocket `@bookTicker` | One-second top-of-book summaries. Raw messages are not stored. |
 | Liquidation events | `binance_futures_ws` | `futures` | WebSocket `@forceOrder` | One-second liquidation notional summaries. Raw events are not stored. |
 
-The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance basis rows are written to `futures_basis_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, including the Chainlink BTC `price_to_beat` and `end_price` when Gamma exposes them. CLOB midpoint probability samples are written to `polymarket_probability_samples`.
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance basis rows are written to `futures_basis_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, including the Chainlink BTC `price_to_beat` and `end_price` when Gamma exposes them. CLOB midpoint probability samples are written to `polymarket_probability_samples`. Polymarket RTDS Chainlink BTC/USD samples are written to `chainlink_btc_price_samples`.
 
 ## Sampling Schedule
 
@@ -132,6 +133,24 @@ binance_spot_open_price / close_price / return_pct / direction / quality
 binance_futures_open_price / close_price / return_pct / direction / quality
 polymarket_open_price / close_price / return_pct / direction / winning_outcome
 ```
+
+## Chainlink BTC Price Samples
+
+`chainlink_btc_price_samples` stores the Polymarket-provided live BTC/USD Chainlink reference path from RTDS. The collector subscribes to `crypto_prices_chainlink` with `btc/usd`, sends `PING` every 5 seconds, keeps the latest tick in memory, and writes that latest tick on the same scheduled timestamps as Binance price sampling: every 5 seconds through `275s`, every 1 second from `280s` through `299s`, and one close-boundary sample at `300s`.
+
+At a close/open boundary, the collector uses one latest RTDS tick and writes it as the closing market `close` sample and the next market `normal` open sample.
+
+These rows are separate from `polymarket_5m_btc_markets.price_to_beat` and `end_price`. Gamma's fields are the official Polymarket market threshold and settlement values after Polymarket exposes them. The RTDS rows are the observed live Polymarket Chainlink BTC path collected during the market, so they can diverge from Binance spot/futures and explain differences like a Binance spot open of `$62,622.01` versus a Chainlink open of `$62,556.13`.
+
+Configuration:
+
+```text
+ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE=true
+POLYMARKET_RTDS_WS_URL=wss://ws-live-data.polymarket.com
+POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL=btc/usd
+```
+
+The collector stores `price`, RTDS topic/symbol, price timestamp, server timestamp, tick age, quality, and the raw RTDS message. No Chainlink API key is required because this feed is provided by Polymarket RTDS.
 
 ## Polymarket BTC 5 Minute Probabilities
 
@@ -705,6 +724,7 @@ The market detail chart prefers this 1-second table for net-taker and CVD displa
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
 | `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities at each pre-close sample timestamp. |
+| `chainlink_btc_price_samples` | Stores Polymarket RTDS BTC/USD Chainlink reference ticks sampled during each 5 minute market. |
 | `market_price_references` | View joining each market to Binance spot/futures labels and Polymarket Chainlink BTC reference prices. |
 | `collector_heartbeats` | Stores latest collector status. |
 | `collection_errors` | Stores request and collection failures. |
@@ -720,4 +740,5 @@ The market detail chart prefers this 1-second table for net-taker and CVD displa
 - Futures positioning and basis collection are enabled by default and can be disabled with `ENABLE_FUTURES_POSITIONING=false`.
 - Futures WebSocket summary collection is enabled by default and can be disabled with `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false`.
 - Polymarket BTC 5 minute probability collection is enabled by default and can be disabled with `ENABLE_POLYMARKET_BTC_5M=false`.
+- Polymarket RTDS Chainlink BTC price sampling is enabled by default and can be disabled with `ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE=false`.
 - WebSocket storage is summary-only. Raw WebSocket messages and raw liquidation events are intentionally not stored.

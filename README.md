@@ -93,6 +93,11 @@ BINANCE_BASIS_PERIOD=5m
 BINANCE_BASIS_CONTRACT_TYPE=PERPETUAL
 POLYMARKET_TIMEOUT_MS=4000
 POLYMARKET_METADATA_PREFETCH_LEAD_MS=60000
+ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE=true
+POLYMARKET_RTDS_WS_URL=wss://ws-live-data.polymarket.com
+POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL=btc/usd
+POLYMARKET_RTDS_PING_INTERVAL_MS=5000
+POLYMARKET_RTDS_STALE_MS=15000
 FORWARD_LABEL_MIN_THRESHOLD_BPS=1
 LARGE_TRADE_QUOTE_THRESHOLD=1000000
 MAX_AGG_TRADE_PAGES_PER_MARKET=30
@@ -100,7 +105,7 @@ BINANCE_FUTURES_PUBLIC_WS_BASE_URL=wss://fstream.binance.com/public/stream
 BINANCE_FUTURES_MARKET_WS_BASE_URL=wss://fstream.binance.com/market/stream
 ```
 
-Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector plus Polymarket, unless Polymarket is separately disabled. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest and basis samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed. Set `ENABLE_POLYMARKET_BTC_5M=false` to disable Polymarket probability collection.
+Set `ENABLE_FUTURES_MICROSTRUCTURE=false` to run only the original price collector plus Polymarket, unless Polymarket is separately disabled. Set `ENABLE_FUTURES_POSITIONING=false` to keep futures trade/book collection but skip mark/index/funding/open-interest and basis samples. Set `ENABLE_FUTURES_WEBSOCKET_SUMMARIES=false` to disable the Binance Futures WebSocket summary feed. Set `ENABLE_POLYMARKET_BTC_5M=false` to disable Polymarket probability collection. Set `ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE=false` to disable the unauthenticated Polymarket RTDS Chainlink BTC/USD reference feed.
 
 The collector prefetches Polymarket market metadata before the next 5 minute window starts, then records the next market opening CLOB midpoint sample at the prior market close boundary. `POLYMARKET_METADATA_PREFETCH_LEAD_MS` controls how early that metadata lookup starts.
 
@@ -138,11 +143,12 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `market_forward_labels`
 - `polymarket_5m_btc_markets`
 - `polymarket_probability_samples`
+- `chainlink_btc_price_samples`
 - `market_price_references` view
 - `collector_heartbeats`
 - `collection_errors`
 
-`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `futures_basis_samples`, `polymarket_probability_samples`, `futures_ws_1s_summaries`, `market_forward_labels`, `market_trade_flow_1s`, and `market_microprice_buckets` into hypertables.
+`npm run db:setup` creates the core PostgreSQL schema. If TimescaleDB is installed, it also attempts to convert `price_samples`, `book_samples`, `derivative_position_samples`, `futures_basis_samples`, `polymarket_probability_samples`, `chainlink_btc_price_samples`, `futures_ws_1s_summaries`, `market_forward_labels`, `market_trade_flow_1s`, and `market_microprice_buckets` into hypertables.
 
 ## Health endpoint
 

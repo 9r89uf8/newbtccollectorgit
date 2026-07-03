@@ -1,6 +1,7 @@
-import { closePool } from "../lib/db.js";
+import { closePool, query } from "../lib/db.js";
 import {
   COLLECTOR_NAME,
+  PRICE_SOURCES,
   ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE,
   ENABLE_FUTURES_MICROSTRUCTURE,
   ENABLE_FUTURES_POSITIONING,
@@ -68,6 +69,8 @@ import {
 let stopping = false;
 let futuresWebSocketCollector = null;
 let polymarketChainlinkBtcPriceCollector = null;
+const ensuredBoundaryCloseStarts = new Set();
+const BOUNDARY_CLOSE_GRACE_MS = 5000;
 const pendingMarketClosures = new Map();
 
 async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {
@@ -142,6 +145,55 @@ async function collectScheduledPolymarketChainlinkBtcPriceSamples(market, schedu
     ],
     scheduledAt
   );
+}
+
+async function countBoundaryClosePriceSources(market, boundaryAt) {
+  const result = await query(
+    `
+      select count(distinct source)::int as source_count
+      from price_samples
+      where symbol = $1
+        and scheduled_at = $2
+        and sample_type = 'close'
+        and source = any($3::text[])
+    `,
+    [market.symbol, boundaryAt, PRICE_SOURCES.map((sourceConfig) => sourceConfig.source)]
+  );
+
+  return Number(result.rows[0]?.source_count || 0);
+}
+
+async function ensurePreviousMarketCloseSample(currentMarket, nowMs = Date.now()) {
+  if (ensuredBoundaryCloseStarts.has(currentMarket.startMs)) {
+    return { available: true, skipped: true };
+  }
+
+  const boundaryLagMs = nowMs - currentMarket.startMs;
+  if (boundaryLagMs < 0 || boundaryLagMs > BOUNDARY_CLOSE_GRACE_MS) {
+    return { available: false, skipped: true };
+  }
+
+  const boundaryAt = new Date(currentMarket.startMs);
+  const previousMarket = getMarketWindow(new Date(currentMarket.startMs - 1), currentMarket.symbol);
+  const expectedSourceCount = PRICE_SOURCES.length;
+  const existingSourceCount = await countBoundaryClosePriceSources(previousMarket, boundaryAt);
+
+  if (existingSourceCount >= expectedSourceCount) {
+    ensuredBoundaryCloseStarts.add(currentMarket.startMs);
+    scheduleMarketClose(previousMarket);
+    await closeDueMarkets({ waitForClose: false });
+    return { available: true, skipped: true };
+  }
+
+  await upsertMarket(previousMarket);
+  await collectScheduledData(previousMarket, boundaryAt, "close");
+  scheduleMarketClose(previousMarket);
+  await closeDueMarkets({ waitForClose: false });
+
+  const sourceCount = await countBoundaryClosePriceSources(previousMarket, boundaryAt);
+  const available = sourceCount >= expectedSourceCount;
+  if (available) ensuredBoundaryCloseStarts.add(currentMarket.startMs);
+  return { available, collected: true };
 }
 
 function scheduleMarketClose(market) {
@@ -398,6 +450,7 @@ export async function runCollector() {
     await upsertMarket(market);
 
     const scheduledMs = getNextScheduledMs(Date.now(), market);
+    const previousClose = await ensurePreviousMarketCloseSample(market);
     const prefetchWaitMs = Math.max(0, scheduledMs - Date.now());
     if (prefetchWaitMs > 1500) {
       await prefetchUpcomingPolymarketMetadata(market, Date.now());
@@ -409,6 +462,16 @@ export async function runCollector() {
 
     const scheduledAt = new Date(scheduledMs);
     const sampleType = getSampleType(scheduledMs, market);
+
+    if (scheduledMs === market.startMs && previousClose.available) {
+      await heartbeat(
+        COLLECTOR_NAME,
+        "running",
+        market.id,
+        `boundary close available at ${toIsoSeconds(scheduledAt)}`
+      );
+      continue;
+    }
 
     await collectScheduledData(market, scheduledAt, sampleType);
 

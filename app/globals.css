@@ -960,24 +960,43 @@ td strong {
   height: 100%;
 }
 
+.microprice-panel-help-row,
 .imbalance-panel-help-row {
   position: absolute;
-  top: 604px;
-  right: 150px;
   z-index: 2;
   display: flex;
   flex-wrap: nowrap;
   gap: 6px;
 }
 
+.microprice-panel-help-row {
+  top: 424px;
+  left: 386px;
+}
+
+.imbalance-panel-help-row {
+  top: 637px;
+  right: 150px;
+}
+
+.microprice-panel-help-note,
 .imbalance-panel-help-note {
   position: absolute;
-  top: 638px;
-  right: 150px;
   z-index: 3;
-  width: min(420px, calc(100% - 250px));
+  width: min(420px, calc(100% - 430px));
   margin-top: 0;
   box-shadow: 0 12px 30px rgba(16, 24, 40, 0.14);
+}
+
+.microprice-panel-help-note {
+  top: 458px;
+  left: 386px;
+}
+
+.imbalance-panel-help-note {
+  top: 671px;
+  right: 150px;
+  width: min(420px, calc(100% - 250px));
 }
 
 @media (max-width: 760px) {

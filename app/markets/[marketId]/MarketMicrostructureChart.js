@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as echarts from "echarts";
 
+const MICROPRICE_HELP_TOPIC_IDS = new Set(["microprice"]);
 const IMBALANCE_HELP_TOPIC_IDS = new Set(["takerImbalance", "bookImbalance", "spread"]);
 
 const HELP_TOPICS = [
@@ -56,11 +57,10 @@ const HELP_TOPICS = [
     label: "Microprice",
     text: "Microprice is the order book's center of gravity: (best ask * bid size + best bid * ask size) / (bid size + ask size). If bid size is heavier, microprice leans above the midprice toward the ask, which points to short-term upward pressure. If ask size is heavier, it leans below the midprice toward the bid, which points to short-term downward pressure.",
     details: [
-      "The microprice panel keeps raw one-second lean next to causal smoothed lines. Raw lean reacts fastest, while smoothed lines show whether the pressure persisted.",
-      "Microprice EWMA 3s is a causal exponentially weighted blend of the current valid second and the prior two seconds, so it is useful for 1s to 5s reads without looking ahead.",
-      "Microprice 5s and 10s are trailing average normalized lean over the last 5 and 10 valid seconds. They reduce noise while staying more responsive than the 30s line.",
-      "Microprice 30s is slower but useful for 30s to 60s reads because it filters noise and shows persistent pressure.",
-      "All visible lean lines stay on the -1 to +1 scale: above 0 = upward book pressure, below 0 = downward book pressure, near 0 = balanced. The separate pressure line can reach +30 or -70 because it accumulates one-second lean over time.",
+      "The microprice panel displays two causal smoothed lines: EWMA 3s for very short-horizon pressure and avg 10s for short persistence.",
+      "Microprice EWMA 3s is an exponentially weighted blend of the current valid second and the prior two seconds, so it reacts quickly without looking ahead.",
+      "Microprice 10s is the trailing average normalized lean over the last 10 valid seconds, which reduces noise while keeping the signal responsive.",
+      "Both visible lean lines stay on the -1 to +1 scale: above 0 = upward book pressure, below 0 = downward book pressure, near 0 = balanced. The separate pressure line can reach +30 or -70 because it accumulates one-second lean over time.",
     ],
   },
   {
@@ -328,13 +328,9 @@ function buildTooltip(params) {
       ${detail("30s net", "Taker pressure 30s", 2, formatCompactUsd)}
       ${detail("30s gross", "Taker pressure 30s", 3, formatCompactUsd)}
       ${row("Book imbalance", "Book imbalance", (value) => formatDecimal(value, 3))}
-      ${row("Microprice raw", "Microprice raw", (value) => formatDecimal(value, 3))}
-      ${detail("Lean delta 1s", "Microprice raw", 2, (value) => formatDecimal(value, 3))}
       ${row("Microprice EWMA 3s", "Microprice EWMA 3s", (value) => formatDecimal(value, 3))}
-      ${row("Microprice 5s", "Microprice 5s", (value) => formatDecimal(value, 3))}
       ${row("Microprice 10s", "Microprice 10s", (value) => formatDecimal(value, 3))}
-      ${row("Microprice 30s", "Microprice 30s", (value) => formatDecimal(value, 3))}
-      ${detailText("Micro signal", "Microprice 30s", 2)}
+      ${detailText("Micro signal", "Microprice 10s", 2)}
       ${row("Spread", "Spread", formatBps)}
       ${row("WS spread", "WS spread", formatBps)}
       ${detail("WS spread max", "WS spread", 2, formatBps)}
@@ -359,8 +355,10 @@ export default function MarketMicrostructureChart({
 }) {
   const chartRef = useRef(null);
   const [activeTopHelpId, setActiveTopHelpId] = useState(null);
+  const [activeMicropriceHelpId, setActiveMicropriceHelpId] = useState(null);
   const [activeImbalanceHelpId, setActiveImbalanceHelpId] = useState(null);
   const activeTopHelp = HELP_TOPICS.find((topic) => topic.id === activeTopHelpId);
+  const activeMicropriceHelp = HELP_TOPICS.find((topic) => topic.id === activeMicropriceHelpId);
   const activeImbalanceHelp = HELP_TOPICS.find((topic) => topic.id === activeImbalanceHelpId);
 
   const option = useMemo(() => {
@@ -468,21 +466,12 @@ export default function MarketMicrostructureChart({
         signedLogNetTaker(summary.netLiquidation),
         summary.netLiquidation,
       ]);
-    const micropriceRawData = micropriceRows
-      .filter((bucket) => bucket.lean !== null)
-      .map((bucket) => [bucket.time, bucket.lean, bucket.leanDelta1s]);
     const micropriceEwma3Data = micropriceRows
       .filter((bucket) => bucket.ewmaLean3s !== null)
       .map((bucket) => [bucket.time, bucket.ewmaLean3s]);
-    const micropriceAvg5Data = micropriceRows
-      .filter((bucket) => bucket.avgLean5s !== null)
-      .map((bucket) => [bucket.time, bucket.avgLean5s]);
     const micropriceAvg10Data = micropriceRows
       .filter((bucket) => bucket.avgLean10s !== null)
       .map((bucket) => [bucket.time, bucket.avgLean10s, bucket.persistenceSignal]);
-    const micropriceAvg30Data = micropriceRows
-      .filter((bucket) => bucket.avgLean30s !== null)
-      .map((bucket) => [bucket.time, bucket.avgLean30s, bucket.persistenceSignal]);
     const micropricePressureData = micropriceRows
       .filter((bucket) => bucket.pressureMarket !== null)
       .map((bucket) => [bucket.time, bucket.pressureMarket, bucket.behavior]);
@@ -509,11 +498,30 @@ export default function MarketMicrostructureChart({
         },
         {
           data: [
+            { name: "Microprice EWMA 3s", itemStyle: { color: "#c11574" } },
+            { name: "Microprice 10s", itemStyle: { color: "#155eef" } },
+          ],
+          top: 432,
+          left: 170,
+          icon: "rect",
+          itemWidth: 24,
+          itemHeight: 4,
+          formatter: (name) => {
+            const labels = {
+              "Microprice EWMA 3s": "EWMA 3s",
+              "Microprice 10s": "avg 10s",
+            };
+            return labels[name] || name;
+          },
+          textStyle: { color: "#475467", fontSize: 12 },
+        },
+        {
+          data: [
             { name: "Taker pressure 30s", itemStyle: { color: "#7a5af8" } },
             { name: "Book imbalance", itemStyle: { color: "#067647" } },
             { name: "Spread", itemStyle: { color: "#b54708" } },
           ],
-          top: 612,
+          top: 637,
           left: 170,
           icon: "rect",
           itemWidth: 24,
@@ -546,10 +554,10 @@ export default function MarketMicrostructureChart({
       grid: [
         { left: 78, right: 132, top: 58, height: 165 },
         { left: 78, right: 132, top: 290, height: 105 },
-        { left: 78, right: 132, top: 455, height: 105 },
-        { left: 78, right: 132, top: 660, height: 110 },
-        { left: 78, right: 132, top: 845, height: 110 },
-        { left: 78, right: 132, top: 1015, height: 190 },
+        { left: 78, right: 132, top: 480, height: 105 },
+        { left: 78, right: 132, top: 685, height: 110 },
+        { left: 78, right: 132, top: 870, height: 110 },
+        { left: 78, right: 132, top: 1040, height: 190 },
       ],
       xAxis: [0, 1, 2, 3, 4, 5].map((gridIndex) => ({
         type: "time",
@@ -804,13 +812,13 @@ export default function MarketMicrostructureChart({
         },
 
         {
-          name: "Microprice raw",
+          name: "Microprice EWMA 3s",
           type: "line",
           xAxisIndex: 2,
           yAxisIndex: 2,
-          data: micropriceRawData,
+          data: micropriceEwma3Data,
           showSymbol: false,
-          lineStyle: { color: "#98a2b3", width: 1, opacity: 0.75 },
+          lineStyle: { color: "#c11574", width: 1.8 },
           markLine: {
             symbol: "none",
             silent: true,
@@ -820,24 +828,6 @@ export default function MarketMicrostructureChart({
           },
         },
         {
-          name: "Microprice EWMA 3s",
-          type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 2,
-          data: micropriceEwma3Data,
-          showSymbol: false,
-          lineStyle: { color: "#c11574", width: 1.8 },
-        },
-        {
-          name: "Microprice 5s",
-          type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 2,
-          data: micropriceAvg5Data,
-          showSymbol: false,
-          lineStyle: { color: "#0e7490", width: 1.55 },
-        },
-        {
           name: "Microprice 10s",
           type: "line",
           xAxisIndex: 2,
@@ -845,15 +835,6 @@ export default function MarketMicrostructureChart({
           data: micropriceAvg10Data,
           showSymbol: false,
           lineStyle: { color: "#155eef", width: 1.35, type: "dashed" },
-        },
-        {
-          name: "Microprice 30s",
-          type: "line",
-          xAxisIndex: 2,
-          yAxisIndex: 2,
-          data: micropriceAvg30Data,
-          showSymbol: false,
-          lineStyle: { color: "#7a5af8", width: 1.35, type: "dotted" },
         },
         {
           name: "Spread",
@@ -940,7 +921,10 @@ export default function MarketMicrostructureChart({
     return <p className="muted">No price series for this market.</p>;
   }
 
-  const topHelpTopics = HELP_TOPICS.filter((topic) => !IMBALANCE_HELP_TOPIC_IDS.has(topic.id));
+  const topHelpTopics = HELP_TOPICS.filter(
+    (topic) => !MICROPRICE_HELP_TOPIC_IDS.has(topic.id) && !IMBALANCE_HELP_TOPIC_IDS.has(topic.id)
+  );
+  const micropriceHelpTopics = HELP_TOPICS.filter((topic) => MICROPRICE_HELP_TOPIC_IDS.has(topic.id));
   const imbalanceHelpTopics = HELP_TOPICS.filter((topic) => IMBALANCE_HELP_TOPIC_IDS.has(topic.id));
 
   return (
@@ -952,6 +936,7 @@ export default function MarketMicrostructureChart({
             className={`chart-help-button ${activeTopHelpId === topic.id ? "chart-help-button-active" : ""}`}
             key={topic.id}
             onClick={() => {
+              setActiveMicropriceHelpId(null);
               setActiveImbalanceHelpId(null);
               setActiveTopHelpId(activeTopHelpId === topic.id ? null : topic.id);
             }}
@@ -977,6 +962,37 @@ export default function MarketMicrostructureChart({
       ) : null}
       <div className="echarts-scroll">
         <div className="echarts-chart-stage">
+          <div className="microprice-panel-help-row" aria-label="Micro lean panel glossary">
+            {micropriceHelpTopics.map((topic) => (
+              <button
+                type="button"
+                className={`chart-help-button chart-help-button-compact ${activeMicropriceHelpId === topic.id ? "chart-help-button-active" : ""}`}
+                key={topic.id}
+                onClick={() => {
+                  setActiveTopHelpId(null);
+                  setActiveImbalanceHelpId(null);
+                  setActiveMicropriceHelpId(activeMicropriceHelpId === topic.id ? null : topic.id);
+                }}
+                aria-expanded={activeMicropriceHelpId === topic.id}
+              >
+                <span>{topic.label}</span>
+                <b>?</b>
+              </button>
+            ))}
+          </div>
+          {activeMicropriceHelp ? (
+            <div className="chart-help-note microprice-panel-help-note" role="note">
+              <strong>{activeMicropriceHelp.label}</strong>
+              <p>{activeMicropriceHelp.text}</p>
+              {activeMicropriceHelp.details ? (
+                <ul>
+                  {activeMicropriceHelp.details.map((detail) => (
+                    <li key={detail}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <div className="imbalance-panel-help-row" aria-label="Imbalance panel glossary">
             {imbalanceHelpTopics.map((topic) => (
               <button
@@ -985,6 +1001,7 @@ export default function MarketMicrostructureChart({
                 key={topic.id}
                 onClick={() => {
                   setActiveTopHelpId(null);
+                  setActiveMicropriceHelpId(null);
                   setActiveImbalanceHelpId(activeImbalanceHelpId === topic.id ? null : topic.id);
                 }}
                 aria-expanded={activeImbalanceHelpId === topic.id}

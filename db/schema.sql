@@ -340,6 +340,53 @@ create table if not exists market_labels (
 create index if not exists market_labels_source_created_idx
   on market_labels (source, created_at desc);
 
+create or replace view market_price_references as
+select
+  m.id as market_id,
+  m.symbol,
+  m.start_time,
+  m.end_time,
+  m.status,
+  spot.open_price as binance_spot_open_price,
+  spot.close_price as binance_spot_close_price,
+  spot.return_pct as binance_spot_return_pct,
+  spot.direction as binance_spot_direction,
+  spot.quality as binance_spot_quality,
+  futures.open_price as binance_futures_open_price,
+  futures.close_price as binance_futures_close_price,
+  futures.return_pct as binance_futures_return_pct,
+  futures.direction as binance_futures_direction,
+  futures.quality as binance_futures_quality,
+  pm.price_to_beat as polymarket_open_price,
+  pm.end_price as polymarket_close_price,
+  case
+    when pm.price_to_beat is not null and pm.end_price is not null and pm.price_to_beat > 0
+      then ((pm.end_price - pm.price_to_beat) / pm.price_to_beat) * 100
+    else null
+  end as polymarket_return_pct,
+  case
+    when pm.winning_outcome in ('up', 'down') then pm.winning_outcome
+    when pm.price_to_beat is not null and pm.end_price is not null and pm.end_price >= pm.price_to_beat then 'up'
+    when pm.price_to_beat is not null and pm.end_price is not null and pm.end_price < pm.price_to_beat then 'down'
+    else null
+  end as polymarket_direction,
+  pm.winning_outcome as polymarket_winning_outcome,
+  pm.closed as polymarket_closed,
+  pm.gamma_status as polymarket_gamma_status,
+  pm.slug as polymarket_slug,
+  pm.last_metadata_refresh_at as polymarket_last_metadata_refresh_at,
+  pm.resolved_at as polymarket_resolved_at
+from markets m
+left join market_labels spot
+  on spot.market_id = m.id
+ and spot.source = 'binance_spot'
+left join market_labels futures
+  on futures.market_id = m.id
+ and futures.source = 'binance_futures'
+left join polymarket_5m_btc_markets pm
+  on pm.market_id = m.id
+ and pm.source = 'polymarket_gamma';
+
 create table if not exists market_features (
   market_id text not null references markets(id) on delete cascade,
   source text not null,

@@ -61,6 +61,32 @@ function directionClass(direction) {
   return "direction-flat";
 }
 
+function formatClassName(value) {
+  if (!value) return "-";
+  return String(value).replaceAll("_", " ");
+}
+
+function referenceQuality(openPrice, closePrice) {
+  const hasOpen = Number.isFinite(Number(openPrice));
+  const hasClose = Number.isFinite(Number(closePrice));
+  if (hasOpen && hasClose) return "complete";
+  if (hasOpen || hasClose) return "partial";
+  return "missing";
+}
+
+function PricePair({ openPrice, closePrice }) {
+  const hasOpen = Number.isFinite(Number(openPrice));
+  const hasClose = Number.isFinite(Number(closePrice));
+  if (!hasOpen && !hasClose) return "-";
+
+  return (
+    <div className="price-pair">
+      <strong>{formatPrice(closePrice)}</strong>
+      <span className="subtext">open {formatPrice(openPrice)}</span>
+    </div>
+  );
+}
+
 function Metric({ label, value, tone = "default" }) {
   return (
     <div className={`metric metric-${tone}`}>
@@ -180,41 +206,57 @@ function MarketRows({ markets }) {
             <tr>
               <th>Window</th>
               <th>Status</th>
-              <th>Source</th>
-              <th>Open</th>
-              <th>Close</th>
-              <th>Return</th>
-              <th>Samples</th>
-              <th>Quality</th>
+              <th>Binance Futures BTC</th>
+              <th>Binance move</th>
+              <th>Polymarket BTC</th>
+              <th>Polymarket outcome</th>
+              <th>Reference quality</th>
             </tr>
           </thead>
           <tbody>
             {markets.length === 0 ? (
               <tr>
-                <td colSpan="8" className="empty-cell">No markets created yet.</td>
+                <td colSpan="7" className="empty-cell">No markets created yet.</td>
               </tr>
             ) : (
-              markets.flatMap((market) => {
-                const labels = market.labels.length > 0 ? market.labels : [null];
-                return labels.map((label, index) => (
-                  <tr key={`${market.id}-${label?.source || "empty"}`}>
+              markets.map((market) => {
+                const polymarketQuality = referenceQuality(
+                  market.polymarket_open_price,
+                  market.polymarket_close_price
+                );
+
+                return (
+                  <tr key={market.id}>
                     <td>
-                      {index === 0 ? (
-                        <div>
-                          <Link className="market-link" href={`/markets/${encodeURIComponent(market.id)}`}>{formatUtc(market.start_time)}</Link>
-                          <span className="subtext">{market.symbol}</span>
-                        </div>
-                      ) : null}
+                      <div>
+                        <Link className="market-link" href={`/markets/${encodeURIComponent(market.id)}`}>{formatUtc(market.start_time)}</Link>
+                        <span className="subtext">{market.symbol}</span>
+                      </div>
                     </td>
-                    <td>{index === 0 ? <span className={`status-pill ${statusClass(market.status)}`}>{market.status}</span> : null}</td>
-                    <td>{label?.source || "-"}</td>
-                    <td>{formatPrice(label?.open_price)}</td>
-                    <td>{formatPrice(label?.close_price)}</td>
-                    <td className={directionClass(label?.direction)}>{formatPct(label?.return_pct)}</td>
-                    <td>{label?.sample_count || "-"}</td>
-                    <td>{label ? <span className={`status-pill ${statusClass(label.quality)}`}>{label.quality}</span> : "-"}</td>
+                    <td><span className={`status-pill ${statusClass(market.status)}`}>{market.status}</span></td>
+                    <td>
+                      <PricePair
+                        openPrice={market.binance_futures_open_price}
+                        closePrice={market.binance_futures_close_price}
+                      />
+                    </td>
+                    <td className={directionClass(market.binance_futures_direction)}>{formatPct(market.binance_futures_return_pct)}</td>
+                    <td>
+                      <PricePair
+                        openPrice={market.polymarket_open_price}
+                        closePrice={market.polymarket_close_price}
+                      />
+                      <span className="subtext">Chainlink via Polymarket</span>
+                    </td>
+                    <td className={directionClass(market.polymarket_direction)}>{formatClassName(market.polymarket_direction || market.polymarket_winning_outcome)}</td>
+                    <td>
+                      <div className="reference-quality-list">
+                        <span className={`status-pill ${statusClass(market.binance_futures_quality || "missing")}`}>binance {market.binance_futures_quality || "missing"}</span>
+                        <span className={`status-pill ${statusClass(polymarketQuality)}`}>chainlink {polymarketQuality}</span>
+                      </div>
+                    </td>
                   </tr>
-                ));
+                );
               })
             )}
           </tbody>

@@ -80,7 +80,7 @@ The collector records the original spot/futures last-price samples and, by defau
 - Uniform per-second `market_trade_flow_1s` rows for taker flow, CVD, and rolling flow windows
 - Per-second `market_microprice_buckets` rows for top-of-book pressure
 - Forward outcome labels for 1s, 5s, 10s, 15s, 30s, and 60s horizons
-- Polymarket 5 minute BTC Up/Down market metadata and CLOB midpoint probabilities
+- Polymarket 5 minute BTC Up/Down market metadata, Chainlink BTC reference prices, and CLOB midpoint probabilities
 
 Relevant env settings:
 
@@ -117,7 +117,7 @@ npm run features:backfill-trade-flow-1s -- 288
 
 See `docs/data-model.md` for a detailed explanation of what the collector records and how 5 minute markets work.
 
-## Database tables
+## Database tables and views
 
 - `markets`
 - `price_samples`
@@ -138,6 +138,7 @@ See `docs/data-model.md` for a detailed explanation of what the collector record
 - `market_forward_labels`
 - `polymarket_5m_btc_markets`
 - `polymarket_probability_samples`
+- `market_price_references` view
 - `collector_heartbeats`
 - `collection_errors`
 

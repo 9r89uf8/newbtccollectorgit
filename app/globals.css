@@ -428,7 +428,21 @@ td strong {
 }
 
 .market-list-table {
-  min-width: 680px;
+  min-width: 1080px;
+}
+
+.price-pair strong {
+  white-space: nowrap;
+}
+
+.reference-quality-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reference-quality-list:not(:first-child) {
+  margin-top: 8px;
 }
 
 .market-quality-list {
@@ -448,6 +462,7 @@ td strong {
   font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
+
 .error-list {
   display: grid;
   gap: 10px;

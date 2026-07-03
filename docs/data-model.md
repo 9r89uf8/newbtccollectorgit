@@ -20,11 +20,11 @@ It records these data families.
 | Top-100 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=100` | Derived top-of-book and depth metrics at each scheduled sample time. |
 | Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, mark/index basis, funding, and current open interest on a 5 second cadence. |
 | Futures basis | `binance_futures` | `futures` | `/futures/data/basis` | Binance 5 minute basis, basis rate, futures price, and index price for `PERPETUAL` by default. |
-| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata and paired Up/Down midpoint probabilities. |
+| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata, Polymarket Chainlink BTC reference prices, and paired Up/Down midpoint probabilities. |
 | Top-of-book updates | `binance_futures_ws` | `futures` | WebSocket `@bookTicker` | One-second top-of-book summaries. Raw messages are not stored. |
 | Liquidation events | `binance_futures_ws` | `futures` | WebSocket `@forceOrder` | One-second liquidation notional summaries. Raw events are not stored. |
 
-The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance basis rows are written to `futures_basis_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, and CLOB midpoint probability samples are written to `polymarket_probability_samples`.
+The spot and futures last-price samples are written to `price_samples`. Futures aggregate trades are written to `agg_trades`. Futures book-depth metrics are written to `book_samples`. Futures positioning samples are written to `derivative_position_samples`. Binance basis rows are written to `futures_basis_samples`. Binance Futures WebSocket updates are folded into `futures_ws_1s_summaries`. Polymarket Gamma market metadata is written to `polymarket_5m_btc_markets`, including the Chainlink BTC `price_to_beat` and `end_price` when Gamma exposes them. CLOB midpoint probability samples are written to `polymarket_probability_samples`.
 
 ## Sampling Schedule
 
@@ -111,6 +111,28 @@ and scheduled_at < market.end_time
 ```
 
 
+## Market BTC Price References
+
+Every market should be readable with both exchange BTC prices and Polymarket's BTC reference prices.
+
+Binance prices come from sampled `price_samples` rows and are materialized as `market_labels` after close. The dashboard uses `binance_futures` as the primary Binance BTC reference for market comparison because the microstructure features are futures-based; `binance_spot` labels are still stored and exposed.
+
+Polymarket prices come from Gamma settlement metadata in `polymarket_5m_btc_markets`:
+
+| Field | Meaning |
+| --- | --- |
+| `price_to_beat` | Polymarket's Chainlink BTC reference price for the market start/open threshold. |
+| `end_price` | Polymarket's Chainlink BTC reference price used for final settlement. |
+| `winning_outcome` | Polymarket settlement direction, with ties treated as `up` when both Chainlink prices are available. |
+
+The `market_price_references` view joins each `markets` row to its Binance spot/futures labels and Polymarket Chainlink prices. It exposes one row per market with fields such as:
+
+```text
+binance_spot_open_price / close_price / return_pct / direction / quality
+binance_futures_open_price / close_price / return_pct / direction / quality
+polymarket_open_price / close_price / return_pct / direction / winning_outcome
+```
+
 ## Polymarket BTC 5 Minute Probabilities
 
 Polymarket markets are discovered by deterministic slug:
@@ -136,7 +158,8 @@ Expected Polymarket probability samples per complete market:
 76 total probability samples
 ```
 
-Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Settlement metadata such as `price_to_beat`, `end_price`, and `winning_outcome` is refreshed from Gamma after close and can arrive later than `market.end_time`.
+Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Settlement metadata such as Chainlink `price_to_beat`, Chainlink `end_price`, and `winning_outcome` is refreshed from Gamma after close and can arrive later than `market.end_time`.
+
 ## Market Status
 
 The `markets.status` field can be:
@@ -659,9 +682,9 @@ trade_count
 
 The market detail chart prefers this 1-second table for net-taker and CVD display when rows exist, falling back to `market_feature_buckets` and `market_cvd_buckets` for older markets.
 
-## Main Tables
+## Main Tables And Views
 
-| Table | Purpose |
+| Table/View | Purpose |
 | --- | --- |
 | `markets` | Defines 5 minute BTCUSDT windows. |
 | `price_samples` | Stores spot and futures latest-price samples. |
@@ -682,6 +705,7 @@ The market detail chart prefers this 1-second table for net-taker and CVD displa
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
 | `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities at each pre-close sample timestamp. |
+| `market_price_references` | View joining each market to Binance spot/futures labels and Polymarket Chainlink BTC reference prices. |
 | `collector_heartbeats` | Stores latest collector status. |
 | `collection_errors` | Stores request and collection failures. |
 

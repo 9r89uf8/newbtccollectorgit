@@ -117,6 +117,14 @@ function signedClass(value) {
   return "direction-flat";
 }
 
+function referenceQuality(openPrice, closePrice) {
+  const hasOpen = Number.isFinite(Number(openPrice));
+  const hasClose = Number.isFinite(Number(closePrice));
+  if (hasOpen && hasClose) return "complete";
+  if (hasOpen || hasClose) return "partial";
+  return "missing";
+}
+
 function SetupState({ error, configured }) {
   return (
     <section className="setup-state">
@@ -181,6 +189,78 @@ function LabelTable({ labels }) {
                 </tr>
               ))
             )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function PriceReferencePanel({ market }) {
+  const rows = [
+    {
+      source: "Binance Spot",
+      note: "sampled ticker",
+      openPrice: market.binance_spot_open_price,
+      closePrice: market.binance_spot_close_price,
+      returnPct: market.binance_spot_return_pct,
+      direction: market.binance_spot_direction,
+      quality: market.binance_spot_quality || "missing",
+    },
+    {
+      source: "Binance Futures",
+      note: "sampled ticker",
+      openPrice: market.binance_futures_open_price,
+      closePrice: market.binance_futures_close_price,
+      returnPct: market.binance_futures_return_pct,
+      direction: market.binance_futures_direction,
+      quality: market.binance_futures_quality || "missing",
+    },
+    {
+      source: "Polymarket Chainlink",
+      note: market.polymarket_slug || "Gamma metadata",
+      openPrice: market.polymarket_open_price,
+      closePrice: market.polymarket_close_price,
+      returnPct: market.polymarket_return_pct,
+      direction: market.polymarket_direction || market.polymarket_winning_outcome,
+      quality: referenceQuality(market.polymarket_open_price, market.polymarket_close_price),
+    },
+  ];
+
+  return (
+    <section className="panel table-panel detail-wide-panel">
+      <div className="panel-heading">
+        <div>
+          <p className="panel-label">Price references</p>
+          <h2>BTC reference prices</h2>
+        </div>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Open</th>
+              <th>Close</th>
+              <th>Return</th>
+              <th>Direction</th>
+              <th>Quality</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.source}>
+                <td>
+                  <strong>{row.source}</strong>
+                  <span className="subtext">{row.note}</span>
+                </td>
+                <td>{formatPrice(row.openPrice)}</td>
+                <td>{formatPrice(row.closePrice)}</td>
+                <td className={signedClass(row.returnPct)}>{formatPct(row.returnPct)}</td>
+                <td className={directionClass(row.direction)}>{formatClassName(row.direction)}</td>
+                <td><span className={`status-pill ${statusClass(row.quality)}`}>{row.quality}</span></td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -907,11 +987,13 @@ export default async function MarketDetailPage({ params }) {
       </header>
 
       <section className="metrics-grid detail-metrics-grid">
-        <DetailMetric label="Window end" value={formatUtc(data.market.end_time)} />
+        <DetailMetric label="Binance BTC" value={formatPrice(data.market.binance_futures_close_price)} />
+        <DetailMetric label="Polymarket BTC" value={formatPrice(data.market.polymarket_close_price)} />
         <DetailMetric label="Futures return" value={formatPct(futuresLabel?.return_pct)} tone={futuresLabel?.direction === "up" ? "good" : futuresLabel?.direction === "down" ? "bad" : "default"} />
         <DetailMetric label="Market class" value={formatClassName(classification?.primary_class)} />
-        <DetailMetric label="Buckets" value={data.buckets.length} />
       </section>
+
+      <PriceReferencePanel market={data.market} />
 
       <ClassificationSummary
         classification={classification}

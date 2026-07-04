@@ -296,6 +296,30 @@ function buildTrailingTakerPressureData(bucketRows) {
   return data;
 }
 
+function buildPrimaryPriceAxisBounds(primaryPriceData, secondaryPriceData = []) {
+  const primaryPrices = primaryPriceData
+    .map((point) => finiteNumber(point?.[1]))
+    .filter((price) => price !== null);
+
+  if (primaryPrices.length === 0) return {};
+
+  const startPrice = primaryPrices[0];
+  const secondaryPrices = secondaryPriceData
+    .map((point) => finiteNumber(point?.[1]))
+    .filter((price) => price !== null);
+  const prices = [...primaryPrices, ...secondaryPrices];
+  const maxDistance = prices.reduce(
+    (largest, price) => Math.max(largest, Math.abs(price - startPrice)),
+    0
+  );
+  const paddedDistance = Math.max(maxDistance * 1.15, Math.abs(startPrice) * 0.00008, 5);
+
+  return {
+    min: Number((startPrice - paddedDistance).toFixed(2)),
+    max: Number((startPrice + paddedDistance).toFixed(2)),
+  };
+}
+
 function buildTooltip(params) {
   const rows = Array.isArray(params) ? params : [params];
   const time = rows[0]?.value?.[0];
@@ -384,6 +408,7 @@ export default function MarketMicrostructureChart({
     const chainlinkPriceData = chainlinkPriceSeries
       .map((sample) => [toTimeValue(sample.time), finiteNumber(sample.price)])
       .filter(([time, price]) => time !== null && price !== null);
+    const primaryPriceAxisBounds = buildPrimaryPriceAxisBounds(chainlinkPriceData, priceData);
     const bucketRows = buckets
       .map((bucket) => ({
         time: toTimeValue(bucket.bucket_start),
@@ -523,7 +548,7 @@ export default function MarketMicrostructureChart({
             { name: "Microprice pressure", itemStyle: { color: "#c11574" } },
             { name: "Net liquidation", itemStyle: { color: "#0e7490" } },
           ],
-          top: 270,
+          top: 365,
           left: 170,
           icon: "rect",
           itemWidth: 24,
@@ -542,7 +567,7 @@ export default function MarketMicrostructureChart({
             { name: "Microprice EWMA 3s", itemStyle: { color: "#c11574" } },
             { name: "Microprice 10s", itemStyle: { color: "#155eef" } },
           ],
-          top: 460,
+          top: 555,
           left: 170,
           icon: "rect",
           itemWidth: 24,
@@ -562,7 +587,7 @@ export default function MarketMicrostructureChart({
             { name: "Book imbalance", itemStyle: { color: "#067647" } },
             { name: "Spread", itemStyle: { color: "#b54708" } },
           ],
-          top: 665,
+          top: 760,
           left: 170,
           icon: "rect",
           itemWidth: 24,
@@ -575,7 +600,7 @@ export default function MarketMicrostructureChart({
             { name: "Mark/index basis", itemStyle: { color: "#c11574" } },
             { name: "BTC on OI", itemStyle: { color: "#475467" } },
           ],
-          top: 850,
+          top: 945,
           left: 170,
           icon: "rect",
           itemWidth: 24,
@@ -612,11 +637,11 @@ export default function MarketMicrostructureChart({
       axisPointer: { link: [{ xAxisIndex: "all" }] },
 
       grid: [
-        { left: 78, right: 132, top: 58, height: 165 },
-        { left: 78, right: 132, top: 318, height: 105 },
-        { left: 78, right: 132, top: 508, height: 105 },
-        { left: 78, right: 132, top: 713, height: 110 },
-        { left: 78, right: 132, top: 898, height: 190 },
+        { left: 78, right: 132, top: 58, height: 260 },
+        { left: 78, right: 132, top: 413, height: 105 },
+        { left: 78, right: 132, top: 603, height: 105 },
+        { left: 78, right: 132, top: 808, height: 110 },
+        { left: 78, right: 132, top: 993, height: 190 },
       ],
       xAxis: [0, 1, 2, 3, 4].map((gridIndex) => ({
         type: "time",
@@ -636,6 +661,7 @@ export default function MarketMicrostructureChart({
           type: "value",
           gridIndex: 0,
           scale: true,
+          ...primaryPriceAxisBounds,
           axisLabel: { color: "#667085", formatter: (value) => formatPrice(value) },
           splitLine: { lineStyle: { color: "#edf2f7" } },
         },
@@ -745,7 +771,6 @@ export default function MarketMicrostructureChart({
           data: priceData,
           showSymbol: false,
           lineStyle: { color: "#175cd3", width: 2.5 },
-          areaStyle: { color: "rgba(23, 92, 211, 0.08)" },
           emphasis: { focus: "series" },
         },
         {
@@ -754,10 +779,9 @@ export default function MarketMicrostructureChart({
           xAxisIndex: 0,
           yAxisIndex: 0,
           data: chainlinkPriceData,
-          showSymbol: true,
-          symbolSize: 6,
+          showSymbol: false,
           connectNulls: true,
-          lineStyle: { color: "#f79009", width: 1.8, type: "dashed" },
+          lineStyle: { color: "#f79009", width: 1.8 },
           itemStyle: { color: "#f79009" },
           emphasis: { focus: "series" },
         },

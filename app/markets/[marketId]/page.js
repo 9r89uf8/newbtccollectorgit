@@ -980,9 +980,11 @@ export default async function MarketDetailPage({ params }) {
     { time: marketStartIso, price: toChartNumber(data.market.polymarket_open_price) },
     { time: marketEndIso, price: toChartNumber(data.market.polymarket_close_price) },
   ].filter((sample) => sample.price !== null);
-  const chartChainlinkPriceSeries = sampledChainlinkPriceSeries.length > 0
-    ? sampledChainlinkPriceSeries
-    : settlementChainlinkPriceSeries;
+  const chartChainlinkPriceSeries = [
+    ...settlementChainlinkPriceSeries.slice(0, 1),
+    ...sampledChainlinkPriceSeries,
+    ...settlementChainlinkPriceSeries.slice(1),
+  ].sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
 
   return (
     <main className="dashboard-shell market-detail-shell">

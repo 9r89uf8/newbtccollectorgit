@@ -975,33 +975,13 @@ td strong {
   height: 100%;
 }
 
-.transition-chart-frame .echarts-chart-stage::before {
-  content: "";
-  position: absolute;
-  z-index: 2;
-  top: 58px;
-  bottom: 52px;
-  left: 50%;
-  border-left: 2px solid rgba(29, 41, 57, 0.74);
-  pointer-events: none;
+/* The transition boundary is drawn by ECharts at the exact market start. */
+.transition-chart-frame .echarts-chart-stage::before,
+.transition-chart-frame .echarts-chart-stage::after {
+  content: none !important;
+  display: none !important;
 }
 
-.transition-chart-frame .echarts-chart-stage::after {
-  content: "Market boundary";
-  position: absolute;
-  z-index: 3;
-  top: 34px;
-  left: calc(50% + 8px);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: rgba(251, 252, 254, 0.94);
-  color: #344054;
-  font-size: 0.72rem;
-  font-weight: 760;
-  padding: 3px 6px;
-  pointer-events: none;
-  white-space: nowrap;
-}
 
 .flow-panel-help-row,
 .microprice-panel-help-row,

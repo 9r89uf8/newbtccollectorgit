@@ -34,6 +34,8 @@ const HELP_TOPICS = [
       "CVD rising + price flat: sellers are absorbing the aggressive buys, so the buying may be less bullish than it looks.",
       "CVD falling + price flat: buyers are absorbing aggressive sells, which can be a support or reversal clue.",
       "CVD falling + price falling: sellers are in control because aggressive selling is moving price down.",
+      "CVD is the 5-minute market cumulative sum, not an average. For short-term flow, use Net taker as the 1-second CVD change, CVD 30s as the rolling net flow, and Taker pressure 30s as the normalized recent-flow read.",
+      "The CVD 30s line starts immediately with the available seconds, then becomes a full trailing 30-second window after the market reaches +30s.",
       "A useful chart read is CVD direction versus price response, not CVD direction alone.",
     ],
   },
@@ -252,6 +254,73 @@ function medianPositive(values) {
   return (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+function buildMarketBreakLineData(bucketRows, valueSelector) {
+  const data = [];
+  let previousMarketId = null;
+  let previousTime = null;
+
+  for (const bucket of bucketRows) {
+    if (bucket.time === null) continue;
+
+    const marketId = bucket.marketId ?? null;
+    if (previousMarketId !== null && marketId !== null && previousMarketId !== marketId) {
+      const breakTime = previousTime !== null && bucket.time > previousTime ? bucket.time - 1 : bucket.time;
+      data.push([breakTime, null, null]);
+    }
+
+    const value = finiteNumber(valueSelector(bucket));
+    if (value !== null) {
+      data.push([bucket.time, signedLogNetTaker(value), value]);
+    }
+
+    previousMarketId = marketId;
+    previousTime = bucket.time;
+  }
+
+  return data;
+}
+
+function buildCvdLineData(bucketRows) {
+  return buildMarketBreakLineData(bucketRows, (bucket) => bucket.cvdMarket);
+}
+
+function buildRollingCvd30sLineData(bucketRows) {
+  const data = [];
+  const windowRows = [];
+  let windowStart = 0;
+  let rollingNet = 0;
+  let currentMarketId = null;
+
+  const rows = bucketRows
+    .filter((bucket) => bucket.time !== null)
+    .sort((left, right) => left.time - right.time);
+
+  for (const bucket of rows) {
+    const marketId = bucket.marketId ?? null;
+    if (currentMarketId !== null && marketId !== null && currentMarketId !== marketId) {
+      const breakTime = bucket.time > 0 ? bucket.time - 1 : bucket.time;
+      data.push([breakTime, null, null]);
+      windowRows.length = 0;
+      windowStart = 0;
+      rollingNet = 0;
+    }
+
+    currentMarketId = marketId;
+    const net = finiteNumber(bucket.netTaker) ?? 0;
+    windowRows.push({ time: bucket.time, net });
+    rollingNet += net;
+
+    const cutoff = bucket.time - TAKER_PRESSURE_WINDOW_MS;
+    while (windowStart < windowRows.length && windowRows[windowStart].time <= cutoff) {
+      rollingNet -= windowRows[windowStart].net;
+      windowStart += 1;
+    }
+
+    data.push([bucket.time, signedLogNetTaker(rollingNet), rollingNet]);
+  }
+
+  return data;
+}
 function buildTrailingTakerPressureData(bucketRows) {
   const rows = bucketRows
     .map((bucket) => ({
@@ -358,6 +427,7 @@ function buildTooltip(params) {
       ${row("Chainlink BTC", "Chainlink BTC", formatPrice)}
       ${row("Net taker", "Net taker", formatCompactUsd, 2)}
       ${row("CVD", "CVD", formatCompactUsd, 2)}
+      ${row("CVD 30s", "CVD rolling 30s", formatSignedCompactUsd, 2)}
       ${row("Pressure sum", "Microprice pressure", (value) => formatDecimal(value, 1))}
       ${detailText("Behavior", "Microprice pressure", 2)}
       ${row("Net liquidation", "Net liquidation", formatCompactUsd, 2)}
@@ -380,6 +450,7 @@ function buildTooltip(params) {
 export default function MarketMicrostructureChart({
   marketStart,
   marketEnd,
+  boundaryTime = null,
   priceSeries,
   buckets,
   tradeFlow1s = [],
@@ -411,11 +482,13 @@ export default function MarketMicrostructureChart({
     const primaryPriceAxisBounds = buildPrimaryPriceAxisBounds(chainlinkPriceData, priceData);
     const bucketRows = buckets
       .map((bucket) => ({
+        marketId: bucket.marketId ?? bucket.market_id ?? null,
         time: toTimeValue(bucket.bucket_start),
         endTime: toTimeValue(bucket.bucket_end),
         netTaker: finiteNumber(bucket.net_taker_quote),
         grossTaker: finiteNumber(bucket.total_volume_quote),
         cvdMarket: finiteNumber(bucket.cvd_market_quote),
+        cvdChange30s: finiteNumber(bucket.cvd_change_30s),
         takerImbalance: finiteNumber(bucket.taker_imbalance),
         bookImbalance: finiteNumber(bucket.book_imbalance_5bps),
         spread: finiteNumber(bucket.spread_bps),
@@ -423,11 +496,13 @@ export default function MarketMicrostructureChart({
       .filter((bucket) => bucket.time !== null);
     const tradeFlowRows = tradeFlow1s
       .map((bucket) => ({
+        marketId: bucket.marketId ?? bucket.market_id ?? null,
         time: toTimeValue(bucket.bucket_start),
         endTime: toTimeValue(bucket.bucket_end),
         netTaker: finiteNumber(bucket.net_taker_quote),
         grossTaker: finiteNumber(bucket.gross_taker_quote),
         cvdMarket: finiteNumber(bucket.cvd_market_quote),
+        cvdChange30s: finiteNumber(bucket.cvd_change_30s),
         takerImbalance: finiteNumber(bucket.taker_imbalance),
       }))
       .filter((bucket) => bucket.time !== null);
@@ -477,9 +552,8 @@ export default function MarketMicrostructureChart({
     const netTakerData = flowRows
       .filter((bucket) => bucket.netTaker !== null)
       .map((bucket) => [bucket.time, signedLogNetTaker(bucket.netTaker), bucket.netTaker]);
-    const cvdData = flowRows
-      .filter((bucket) => bucket.cvdMarket !== null)
-      .map((bucket) => [bucket.time, signedLogNetTaker(bucket.cvdMarket), bucket.cvdMarket]);
+    const cvdData = buildCvdLineData(flowRows);
+    const cvdChange30sData = buildRollingCvd30sLineData(flowRows);
     const takerPressure30sData = buildTrailingTakerPressureData(flowRows);
     const bookImbalanceData = bucketRows
       .filter((bucket) => bucket.bookImbalance !== null)
@@ -528,6 +602,32 @@ export default function MarketMicrostructureChart({
       .map((sample) => [sample.time, sample.downProbability]);
     const start = toTimeValue(marketStart);
     const end = toTimeValue(marketEnd);
+    const boundary = toTimeValue(boundaryTime);
+    const createBoundaryMarkLine = (showLabel = false) => boundary === null ? undefined : {
+      silent: true,
+      symbol: "none",
+      animation: false,
+      lineStyle: { color: "rgba(29, 41, 57, 0.78)", width: 2, type: "solid" },
+      label: showLabel
+        ? {
+            show: true,
+            formatter: "Market boundary",
+            position: "insideEndTop",
+            distance: [8, -24],
+            color: "#344054",
+            backgroundColor: "rgba(251, 252, 254, 0.94)",
+            borderColor: "#d9e0e7",
+            borderWidth: 1,
+            borderRadius: 4,
+            padding: [3, 6],
+            fontSize: 11,
+            fontWeight: 760,
+          }
+        : { show: false },
+      data: [{ xAxis: boundary }],
+    };
+    const boundaryMarkLine = createBoundaryMarkLine(true);
+    const panelBoundaryMarkLine = createBoundaryMarkLine(false);
 
     return {
       animation: false,
@@ -545,6 +645,7 @@ export default function MarketMicrostructureChart({
           data: [
             { name: "Net taker", itemStyle: { color: "#067647" } },
             { name: "CVD", itemStyle: { color: "#175cd3" } },
+            { name: "CVD rolling 30s", itemStyle: { color: "#b54708" } },
             { name: "Microprice pressure", itemStyle: { color: "#c11574" } },
             { name: "Net liquidation", itemStyle: { color: "#0e7490" } },
           ],
@@ -556,6 +657,8 @@ export default function MarketMicrostructureChart({
           formatter: (name) => {
             const labels = {
               "Net liquidation": "Net liq",
+              "CVD": "CVD 5m",
+              "CVD rolling 30s": "CVD 30s",
               "Microprice pressure": "Micropressure",
             };
             return labels[name] || name;
@@ -616,7 +719,13 @@ export default function MarketMicrostructureChart({
       ],
       tooltip: {
         trigger: "axis",
-        axisPointer: { type: "cross", link: [{ xAxisIndex: "all" }] },
+        axisPointer: {
+          type: "line",
+          show: true,
+          snap: true,
+          lineStyle: { color: "rgba(29, 41, 57, 0)", width: 1, opacity: 0 },
+          label: { show: false },
+        },
         appendToBody: true,
         confine: true,
         formatter: buildTooltip,
@@ -634,7 +743,11 @@ export default function MarketMicrostructureChart({
           textStyle: { color: "#667085" },
         },
       ],
-      axisPointer: { link: [{ xAxisIndex: "all" }] },
+      axisPointer: {
+        link: [{ xAxisIndex: "all" }],
+        lineStyle: { color: "rgba(29, 41, 57, 0)", width: 1, opacity: 0 },
+        label: { show: false },
+      },
 
       grid: [
         { left: 78, right: 132, top: 58, height: 260 },
@@ -668,7 +781,7 @@ export default function MarketMicrostructureChart({
         {
           type: "value",
           gridIndex: 1,
-          name: "flow / CVD",
+          name: "flow / 5m CVD",
           nameTextStyle: { color: "#667085", fontSize: 11 },
           axisLabel: {
             color: "#667085",
@@ -772,6 +885,7 @@ export default function MarketMicrostructureChart({
           showSymbol: false,
           lineStyle: { color: "#175cd3", width: 2.5 },
           emphasis: { focus: "series" },
+          markLine: boundaryMarkLine,
         },
         {
           name: "Chainlink BTC",
@@ -816,6 +930,7 @@ export default function MarketMicrostructureChart({
             color: (params) => (Number(params.value?.[2]) >= 0 ? "#067647" : "#b42318"),
             opacity: 0.82,
           },
+          markLine: panelBoundaryMarkLine,
         },
         {
           name: "CVD",
@@ -824,6 +939,7 @@ export default function MarketMicrostructureChart({
           yAxisIndex: 1,
           data: cvdData,
           showSymbol: false,
+          connectNulls: false,
           lineStyle: { color: "#175cd3", width: 2 },
           markLine: {
             symbol: "none",
@@ -832,6 +948,18 @@ export default function MarketMicrostructureChart({
             lineStyle: { color: "#98a2b3", type: "dashed", width: 1 },
             data: [{ yAxis: 0 }],
           },
+          emphasis: { focus: "series" },
+        },
+        {
+          name: "CVD rolling 30s",
+          type: "line",
+          xAxisIndex: 1,
+          yAxisIndex: 1,
+          data: cvdChange30sData,
+          showSymbol: false,
+          connectNulls: false,
+          lineStyle: { color: "#b54708", width: 1.8, type: "dashed" },
+          itemStyle: { color: "#b54708" },
           emphasis: { focus: "series" },
         },
         {
@@ -865,6 +993,7 @@ export default function MarketMicrostructureChart({
           showSymbol: false,
           lineStyle: { color: "#7a5af8", width: 1.8 },
           itemStyle: { color: "#7a5af8" },
+          markLine: panelBoundaryMarkLine,
         },
         {
           name: "Book imbalance",
@@ -901,6 +1030,7 @@ export default function MarketMicrostructureChart({
           data: micropriceAvg10Data,
           showSymbol: false,
           lineStyle: { color: "#155eef", width: 1.35, type: "dashed" },
+          markLine: panelBoundaryMarkLine,
         },
         {
           name: "Spread",
@@ -920,6 +1050,7 @@ export default function MarketMicrostructureChart({
           data: openInterestData,
           showSymbol: false,
           lineStyle: { color: "#0e7490", width: 1.8 },
+          markLine: panelBoundaryMarkLine,
         },
         {
           name: "Mark/index basis",
@@ -948,7 +1079,7 @@ export default function MarketMicrostructureChart({
         },
       ],
     };
-  }, [buckets, chainlinkPriceSeries, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, tradeFlow1s, webSocketSummaries]);
+  }, [boundaryTime, buckets, chainlinkPriceSeries, marketEnd, marketStart, micropriceBuckets, polymarketProbabilities, positionSeries, priceSeries, tradeFlow1s, webSocketSummaries]);
 
   useEffect(() => {
     if (!chartRef.current) return undefined;

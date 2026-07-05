@@ -69,6 +69,18 @@ function toChartNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function rebaseTransitionRows(rows, sourceKey, targetKey) {
+  let base = null;
+  return rows.map((row) => {
+    const value = row[sourceKey];
+    if (value === null || value === undefined) {
+      return { ...row, [targetKey]: null };
+    }
+    if (base === null) base = value;
+    return { ...row, [targetKey]: value - base };
+  });
+}
+
 function SetupState({ error, configured }) {
   return (
     <section className="setup-state">
@@ -178,29 +190,35 @@ export default async function MarketTransitionPage({ params }) {
     time: toIso(sample.scheduled_at),
     price: Number(sample.price),
   }));
-  const chartBuckets = data.buckets.map((bucket) => ({
+  const rawChartBuckets = data.buckets.map((bucket) => ({
     marketId: bucket.market_id,
     bucket_start: toIso(bucket.bucket_start),
     bucket_end: toIso(bucket.bucket_end),
     total_volume_quote: toChartNumber(bucket.total_volume_quote),
     net_taker_quote: toChartNumber(bucket.net_taker_quote),
     cvd_market_quote: toChartNumber(bucket.cvd_market_quote),
+    cvd_continuous_quote: toChartNumber(bucket.cvd_continuous_quote),
+    cvd_change_30s: toChartNumber(bucket.cvd_change_30s),
     taker_imbalance: toChartNumber(bucket.taker_imbalance),
     book_imbalance_5bps: toChartNumber(bucket.book_imbalance_5bps),
     spread_bps: toChartNumber(bucket.spread_bps),
   }));
-  const chartTradeFlow1s = data.tradeFlow1s.map((bucket) => ({
+  const chartBuckets = rawChartBuckets;
+  const rawChartTradeFlow1s = data.tradeFlow1s.map((bucket) => ({
     marketId: bucket.market_id,
     bucket_start: toIso(bucket.bucket_start),
     bucket_end: toIso(bucket.bucket_end),
     gross_taker_quote: toChartNumber(bucket.gross_taker_quote),
     net_taker_quote: toChartNumber(bucket.net_taker_quote),
     cvd_market_quote: toChartNumber(bucket.cvd_market_quote),
+    cvd_continuous_quote: toChartNumber(bucket.cvd_continuous_quote),
+    cvd_change_30s: toChartNumber(bucket.cvd_change_30s),
     taker_imbalance: toChartNumber(bucket.taker_imbalance),
     rolling_net_30s: toChartNumber(bucket.rolling_net_30s),
     rolling_gross_30s: toChartNumber(bucket.rolling_gross_30s),
     rolling_imbalance_30s: toChartNumber(bucket.rolling_imbalance_30s),
   }));
+  const chartTradeFlow1s = rawChartTradeFlow1s;
   const chartPositionSeries = data.positionSeries.map((sample) => ({
     time: toIso(sample.scheduled_at),
     open_interest_quote: Number(sample.open_interest_quote),
@@ -218,7 +236,7 @@ export default async function MarketTransitionPage({ params }) {
     microprice_bps_from_mid_close: toChartNumber(summary.microprice_bps_from_mid_close),
     avg_event_lag_ms: toChartNumber(summary.avg_event_lag_ms),
   }));
-  const chartMicropriceBuckets = data.micropriceBuckets.map((bucket) => ({
+  const rawChartMicropriceBuckets = data.micropriceBuckets.map((bucket) => ({
     marketId: bucket.market_id,
     bucket_start: toIso(bucket.bucket_start),
     microprice_lean: toChartNumber(bucket.microprice_lean),
@@ -228,9 +246,11 @@ export default async function MarketTransitionPage({ params }) {
     avg_lean_10s: toChartNumber(bucket.avg_lean_10s),
     avg_lean_30s: toChartNumber(bucket.avg_lean_30s),
     microprice_pressure_market: toChartNumber(bucket.microprice_pressure_market),
+    microprice_pressure_continuous: toChartNumber(bucket.microprice_pressure_continuous),
     persistence_signal: bucket.persistence_signal,
     microprice_behavior: bucket.microprice_behavior,
   }));
+  const chartMicropriceBuckets = rebaseTransitionRows(rawChartMicropriceBuckets, "microprice_pressure_continuous", "microprice_pressure_market");
   const chartPolymarketProbabilities = data.polymarketProbabilitySeries.map((sample) => ({
     marketId: sample.market_id,
     time: toIso(sample.scheduled_at),
@@ -295,6 +315,7 @@ export default async function MarketTransitionPage({ params }) {
           <MarketMicrostructureChart
             marketStart={toIso(data.windowStart)}
             marketEnd={toIso(data.windowEnd)}
+            boundaryTime={toIso(data.boundaryTime)}
             priceSeries={chartPriceSeries}
             buckets={chartBuckets}
             tradeFlow1s={chartTradeFlow1s}

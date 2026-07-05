@@ -1,3 +1,4 @@
+//collector/runtime.mjs
 import { closePool, query } from "../lib/db.js";
 import {
   COLLECTOR_NAME,
@@ -72,6 +73,9 @@ let polymarketChainlinkBtcPriceCollector = null;
 const ensuredBoundaryCloseStarts = new Set();
 const BOUNDARY_CLOSE_GRACE_MS = 15000;
 const pendingMarketClosures = new Map();
+const pendingPolymarketOpeningRetries = new Map();
+const POLYMARKET_OPENING_RETRY_MS = 1000;
+const POLYMARKET_OPENING_RETRY_WINDOW_MS = 20000;
 
 async function markStartupMarketIncompleteIfNeeded(market, nowMs = Date.now()) {
   const nextScheduledMs = getNextScheduledMs(nowMs, market);
@@ -120,6 +124,96 @@ async function prefetchUpcomingPolymarketMetadata(market, nowMs = Date.now()) {
   );
 }
 
+function isCompletePolymarketOpening(result) {
+  return result?.ok && result.quality === "complete";
+}
+
+function shouldRetryPolymarketOpening(result) {
+  return ENABLE_POLYMARKET_BTC_5M && !isCompletePolymarketOpening(result);
+}
+
+async function getPolymarketOpeningSample(market, scheduledAt) {
+  const result = await query(
+    `
+      select quality, availability_status, data_delay_ms
+      from polymarket_probability_samples
+      where source = $1
+        and market_id = $2
+        and scheduled_at = $3
+      limit 1
+    `,
+    [POLYMARKET_5M_BTC_SOURCE.probabilitySource, market.id, scheduledAt]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function collectOpeningPolymarketSampleIfNeeded(market, scheduledAt) {
+  if (!ENABLE_POLYMARKET_BTC_5M) {
+    return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.probabilitySource, skipped: true };
+  }
+
+  const existing = await getPolymarketOpeningSample(market, scheduledAt);
+  if (existing?.quality === "complete") {
+    return {
+      ok: true,
+      source: POLYMARKET_5M_BTC_SOURCE.probabilitySource,
+      skipped: true,
+      quality: "complete",
+      availabilityStatus: existing.availability_status,
+      dataDelayMs: existing.data_delay_ms,
+    };
+  }
+
+  await prefetchPolymarketMarketMetadata(market, scheduledAt.getTime());
+  return collectPolymarketProbabilitySample(market, scheduledAt, "normal");
+}
+
+function schedulePolymarketOpeningRetry(market, scheduledAt) {
+  if (!ENABLE_POLYMARKET_BTC_5M || scheduledAt.getTime() !== market.startMs) return;
+
+  const key = `${market.id}:${scheduledAt.getTime()}`;
+  if (pendingPolymarketOpeningRetries.has(key)) return;
+
+  const promise = (async () => {
+    const deadlineMs = scheduledAt.getTime() + POLYMARKET_OPENING_RETRY_WINDOW_MS;
+
+    while (!stopping && Date.now() < deadlineMs) {
+      const sleepMs = Math.min(POLYMARKET_OPENING_RETRY_MS, Math.max(0, deadlineMs - Date.now()));
+      if (sleepMs > 0) await sleep(sleepMs);
+      if (stopping || Date.now() > deadlineMs) break;
+
+      const result = await collectOpeningPolymarketSampleIfNeeded(market, scheduledAt);
+      if (isCompletePolymarketOpening(result)) return;
+    }
+  })()
+    .catch(async (error) => {
+      await recordError({
+        marketId: market.id,
+        source: POLYMARKET_5M_BTC_SOURCE.probabilitySource,
+        errorType: "polymarket_opening_retry_error",
+        message: error.message || String(error),
+      });
+    })
+    .finally(() => {
+      pendingPolymarketOpeningRetries.delete(key);
+    });
+
+  pendingPolymarketOpeningRetries.set(key, promise);
+}
+
+async function waitForPendingPolymarketOpeningRetries() {
+  if (pendingPolymarketOpeningRetries.size === 0) return;
+  await Promise.allSettled([...pendingPolymarketOpeningRetries.values()]);
+}
+
+function describePolymarketOpeningResult(result) {
+  if (!ENABLE_POLYMARKET_BTC_5M) return "disabled";
+  if (result?.skipped && result.quality === "complete") return "already complete";
+  if (result?.quality) return result.quality;
+  return result?.ok ? "attempted" : "failed";
+}
+
 async function collectNextMarketOpeningPolymarketSample(market, scheduledAt) {
   if (!ENABLE_POLYMARKET_BTC_5M || scheduledAt.getTime() !== market.endMs) {
     return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.probabilitySource, skipped: true };
@@ -128,7 +222,12 @@ async function collectNextMarketOpeningPolymarketSample(market, scheduledAt) {
   const nextMarket = getNextMarketAfter(market);
   await upsertMarket(nextMarket);
   await prefetchPolymarketMarketMetadata(nextMarket, scheduledAt.getTime());
-  return collectPolymarketProbabilitySample(nextMarket, scheduledAt, "normal");
+
+  const result = await collectPolymarketProbabilitySample(nextMarket, scheduledAt, "normal");
+  if (shouldRetryPolymarketOpening(result)) {
+    schedulePolymarketOpeningRetry(nextMarket, scheduledAt);
+  }
+  return result;
 }
 
 async function collectScheduledPolymarketChainlinkBtcPriceSamples(market, scheduledAt, sampleType) {
@@ -464,16 +563,24 @@ export async function runCollector() {
     const sampleType = getSampleType(scheduledMs, market);
 
     if (scheduledMs === market.startMs && previousClose.available) {
+      const polyResult = await collectOpeningPolymarketSampleIfNeeded(market, scheduledAt);
+      if (shouldRetryPolymarketOpening(polyResult)) {
+        schedulePolymarketOpeningRetry(market, scheduledAt);
+      }
+
       await heartbeat(
         COLLECTOR_NAME,
-        "running",
+        polyResult.ok ? "running" : "error",
         market.id,
-        `boundary close available at ${toIsoSeconds(scheduledAt)}`
+        `boundary close available at ${toIsoSeconds(scheduledAt)}; opening polymarket ${describePolymarketOpeningResult(polyResult)}`
       );
       continue;
     }
 
     await collectScheduledData(market, scheduledAt, sampleType);
+    if (scheduledMs === market.startMs) {
+      schedulePolymarketOpeningRetry(market, scheduledAt);
+    }
 
     if (scheduledMs >= market.endMs) {
       scheduleMarketClose(market);
@@ -497,6 +604,7 @@ export async function shutdown(signal) {
     }
     await heartbeat(COLLECTOR_NAME, "stopped", null, `stopped by ${signal}`);
   } finally {
+    await waitForPendingPolymarketOpeningRetries();
     await waitForPendingMarketClosures();
     await closePool();
   }

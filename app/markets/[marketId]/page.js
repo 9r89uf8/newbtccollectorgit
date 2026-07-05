@@ -68,6 +68,12 @@ function formatSeconds(value) {
   return `${number}s`;
 }
 
+function formatMilliseconds(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `${formatNumber(number)} ms`;
+}
+
 function formatBps(value, digits = 2) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
@@ -412,10 +418,13 @@ function polymarketCoverageQuality(coverage) {
   const missingCount = readFiniteNumber(coverage.missing_count) || 0;
   const partialCount = readFiniteNumber(coverage.partial_count) || 0;
   const missingQualityCount = readFiniteNumber(coverage.missing_quality_count) || 0;
-  const firstLagSeconds = readFiniteNumber(coverage.first_sample_lag_seconds);
+  const delayedOpenCount = readFiniteNumber(coverage.delayed_open_count) || 0;
+  const firstCompleteLagSeconds = readFiniteNumber(coverage.first_complete_lag_seconds);
+  const openingStatus = coverage.opening_availability_status;
 
   if (sampleCount === 0) return "missing";
-  if (firstLagSeconds !== null && firstLagSeconds > 0) return "late_start";
+  if (firstCompleteLagSeconds !== null && firstCompleteLagSeconds > 0) return "late_start";
+  if (delayedOpenCount > 0 || openingStatus === "delayed_open") return "late_start";
   if (sampleCount < expectedCount || missingCount > 0 || partialCount > 0 || missingQualityCount > 0) return "partial";
   return completeCount >= expectedCount ? "complete" : "partial";
 }
@@ -460,12 +469,24 @@ function PolymarketCoveragePanel({ coverage }) {
             <strong>{formatNumber(coverage.partial_count)}</strong>
           </div>
           <div>
-            <span>First sample</span>
+            <span>First attempt</span>
             <strong>{formatUtc(coverage.first_sample_at)}</strong>
           </div>
           <div>
-            <span>First lag</span>
-            <strong>{formatSeconds(coverage.first_sample_lag_seconds)}</strong>
+            <span>First complete</span>
+            <strong>{formatUtc(coverage.first_complete_at)}</strong>
+          </div>
+          <div>
+            <span>Complete lag</span>
+            <strong>{formatSeconds(coverage.first_complete_lag_seconds)}</strong>
+          </div>
+          <div>
+            <span>Opening status</span>
+            <strong>{formatClassName(coverage.opening_availability_status)}</strong>
+          </div>
+          <div>
+            <span>Opening delay</span>
+            <strong>{formatMilliseconds(coverage.opening_data_delay_ms)}</strong>
           </div>
         </div>
       )}
@@ -997,6 +1018,7 @@ export default async function MarketDetailPage({ params }) {
           <p className="detail-market-id">{data.market.id}</p>
         </div>
         <div className="heartbeat-meta">
+          <Link className="download-link" href={`/markets/${encodeURIComponent(data.market.id)}/transition`}>Transition view</Link>
           <MarketExportLink marketId={data.market.id} />
           <span className={`status-pill ${statusClass(data.market.status)}`}>{data.market.status}</span>
           <span>{data.market.symbol}</span>

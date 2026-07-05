@@ -162,7 +162,7 @@ btc-updown-5m-<utc_start_epoch_seconds>
 
 The slug epoch defines the 5 minute UTC window. Gamma `startDate` and `startDateIso` are treated as Polymarket creation/series metadata, not as the collector market start time.
 
-Probability samples use the same pre-close cadence as the existing collector and do not include a close-boundary sample:
+Probability samples use the same pre-close cadence as the existing collector and do not include a close-boundary sample for the market that is ending. At the close/open boundary, the collector also tries to write the next market opening probability row and retries that opening timestamp for up to 20 seconds if Polymarket is not ready yet:
 
 | Window offset | Frequency | Sample type |
 | --- | --- | --- |
@@ -177,7 +177,9 @@ Expected Polymarket probability samples per complete market:
 76 total probability samples
 ```
 
-Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Settlement metadata such as Chainlink `price_to_beat`, Chainlink `end_price`, and `winning_outcome` is refreshed from Gamma after close and can arrive later than `market.end_time`.
+Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Rows also store `data_delay_ms` and `availability_status` so delayed opening observations are not confused with true on-time `0s` data. Opening retry rows can use `scheduled_at = market.start_time` with `availability_status = delayed_open` when the first usable CLOB midpoint pair arrived after the market had already started. Failed attempts are stored as `quality = missing` with nullable token ids when Gamma metadata or midpoint data is unavailable.
+
+Settlement metadata such as Chainlink `price_to_beat`, Chainlink `end_price`, and `winning_outcome` is refreshed from Gamma after close and can arrive later than `market.end_time`.
 
 ## Market Status
 
@@ -723,7 +725,7 @@ The market detail chart prefers this 1-second table for net-taker and CVD displa
 | `market_microprice_buckets` | Stores per-second top-of-book microprice pressure derived from `futures_ws_1s_summaries`. |
 | `market_forward_labels` | Stores 1s/5s/10s/15s/30s/60s outcome labels derived from WebSocket summaries. |
 | `polymarket_5m_btc_markets` | Stores Polymarket Gamma metadata for each matching 5 minute BTC Up/Down market. |
-| `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities at each pre-close sample timestamp. |
+| `polymarket_probability_samples` | Stores paired Up/Down CLOB midpoint probabilities, missing attempts, and opening delay status at each pre-close sample timestamp. |
 | `chainlink_btc_price_samples` | Stores Polymarket RTDS BTC/USD Chainlink reference ticks sampled during each 5 minute market. |
 | `market_price_references` | View joining each market to Binance spot/futures labels and Polymarket Chainlink BTC reference prices. |
 | `collector_heartbeats` | Stores latest collector status. |

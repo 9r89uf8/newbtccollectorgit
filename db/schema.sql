@@ -212,20 +212,35 @@ create table if not exists polymarket_probability_samples (
   scheduled_at timestamptz not null,
   collected_at timestamptz not null default now(),
   sample_type text not null check (sample_type in ('normal', 'final_ramp')),
-  up_token_id text not null,
-  down_token_id text not null,
+  up_token_id text,
+  down_token_id text,
   up_probability numeric(20, 12),
   down_probability numeric(20, 12),
   up_probability_normalized numeric(20, 12),
   down_probability_normalized numeric(20, 12),
   probability_sum numeric(20, 12),
   request_latency_ms integer,
+  data_delay_ms integer,
+  availability_status text check (availability_status in ('on_time', 'delayed_open', 'missing', 'metadata_missing', 'timeout')),
   quality text not null check (quality in ('complete', 'partial', 'missing')),
   raw_response jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (source, market_id, scheduled_at)
 );
+
+alter table polymarket_probability_samples
+  alter column up_token_id drop not null,
+  alter column down_token_id drop not null,
+  add column if not exists data_delay_ms integer,
+  add column if not exists availability_status text;
+
+alter table polymarket_probability_samples
+  drop constraint if exists polymarket_probability_samples_availability_status_check;
+
+alter table polymarket_probability_samples
+  add constraint polymarket_probability_samples_availability_status_check
+    check (availability_status in ('on_time', 'delayed_open', 'missing', 'metadata_missing', 'timeout') or availability_status is null);
 
 create index if not exists polymarket_probability_samples_symbol_source_time_idx
   on polymarket_probability_samples (symbol, source, scheduled_at desc);

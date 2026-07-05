@@ -1,3 +1,4 @@
+//collector/polymarketSamples.mjs
 import { query } from "../lib/db.js";
 import {
   POLYMARKET_5M_BTC_SOURCE,
@@ -224,6 +225,26 @@ function qualityForPair(upProbability, downProbability) {
   return "missing";
 }
 
+function dataDelayMs(scheduledAt, collectedMs = Date.now()) {
+  return Math.max(0, Math.round(collectedMs - scheduledAt.getTime()));
+}
+
+function availabilityStatusForSample(market, scheduledAt, quality, collectedMs = Date.now()) {
+  if (quality === "missing") return "missing";
+  if (scheduledAt.getTime() === market.startMs && dataDelayMs(scheduledAt, collectedMs) > 2000) {
+    return "delayed_open";
+  }
+  return "on_time";
+}
+
+function availabilityStatusForError(errorType, message) {
+  if (errorType === "timeout") return "timeout";
+  if (/missing Up\/Down CLOB token ids|HTTP 404|not found/i.test(message || "")) {
+    return "metadata_missing";
+  }
+  return "missing";
+}
+
 export function slugForMarket(market) {
   return `btc-updown-5m-${Math.floor(market.startMs / 1000)}`;
 }
@@ -406,6 +427,9 @@ async function insertProbabilitySample(market, metadata, scheduledAt, sampleType
   const downProbability = readProbability(midpointResult.data[metadata.downTokenId]);
   const quality = qualityForPair(upProbability, downProbability);
   const normalized = normalizePair(upProbability, downProbability);
+  const collectedMs = Date.now();
+  const delayMs = dataDelayMs(scheduledAt, collectedMs);
+  const availabilityStatus = availabilityStatusForSample(market, scheduledAt, quality, collectedMs);
 
   await query(
     `
@@ -426,12 +450,14 @@ async function insertProbabilitySample(market, metadata, scheduledAt, sampleType
           down_probability_normalized,
           probability_sum,
           request_latency_ms,
+          data_delay_ms,
+          availability_status,
           quality,
           raw_response
         )
       values (
         $1, $2, $3, $4, $5, now(), $6, $7, $8, $9,
-        $10, $11, $12, $13, $14, $15, $16::jsonb
+        $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb
       )
       on conflict (source, market_id, scheduled_at) do update set
         collected_at = excluded.collected_at,
@@ -444,9 +470,13 @@ async function insertProbabilitySample(market, metadata, scheduledAt, sampleType
         down_probability_normalized = excluded.down_probability_normalized,
         probability_sum = excluded.probability_sum,
         request_latency_ms = excluded.request_latency_ms,
+        data_delay_ms = excluded.data_delay_ms,
+        availability_status = excluded.availability_status,
         quality = excluded.quality,
         raw_response = excluded.raw_response,
         updated_at = now()
+      where polymarket_probability_samples.quality is distinct from 'complete'
+         or excluded.quality = 'complete'
     `,
     [
       POLYMARKET_5M_BTC_SOURCE.probabilitySource,
@@ -463,12 +493,88 @@ async function insertProbabilitySample(market, metadata, scheduledAt, sampleType
       normalized.downProbabilityNormalized,
       normalized.probabilitySum,
       midpointResult.latencyMs,
+      delayMs,
+      availabilityStatus,
       quality,
       JSON.stringify(midpointResult.data),
     ]
   );
 
-  return { quality, upProbability, downProbability };
+  return { quality, upProbability, downProbability, dataDelayMs: delayMs, availabilityStatus };
+}
+
+async function insertMissingProbabilitySample(
+  market,
+  scheduledAt,
+  sampleType,
+  { slug = null, errorType = "missing", errorMessage = null } = {}
+) {
+  const delayMs = dataDelayMs(scheduledAt);
+  const availabilityStatus = availabilityStatusForError(errorType, errorMessage);
+  const rawResponse = {
+    errorType,
+    errorMessage,
+    attemptedAt: new Date().toISOString(),
+  };
+
+  await query(
+    `
+      insert into polymarket_probability_samples
+        (
+          source,
+          market_id,
+          symbol,
+          slug,
+          scheduled_at,
+          collected_at,
+          sample_type,
+          up_token_id,
+          down_token_id,
+          up_probability,
+          down_probability,
+          up_probability_normalized,
+          down_probability_normalized,
+          probability_sum,
+          request_latency_ms,
+          data_delay_ms,
+          availability_status,
+          quality,
+          raw_response
+        )
+      values (
+        $1, $2, $3, $4, $5, now(), $6,
+        null, null,
+        null, null, null, null, null,
+        null,
+        $7,
+        $8,
+        'missing',
+        $9::jsonb
+      )
+      on conflict (source, market_id, scheduled_at) do update set
+        collected_at = excluded.collected_at,
+        sample_type = excluded.sample_type,
+        data_delay_ms = excluded.data_delay_ms,
+        availability_status = excluded.availability_status,
+        quality = excluded.quality,
+        raw_response = excluded.raw_response,
+        updated_at = now()
+      where polymarket_probability_samples.quality is distinct from 'complete'
+    `,
+    [
+      POLYMARKET_5M_BTC_SOURCE.probabilitySource,
+      market.id,
+      market.symbol,
+      slug || slugForMarket(market),
+      scheduledAt,
+      sampleType,
+      delayMs,
+      availabilityStatus,
+      JSON.stringify(rawResponse),
+    ]
+  );
+
+  return { quality: "missing", dataDelayMs: delayMs, availabilityStatus };
 }
 
 async function fetchMidpoints(metadata) {
@@ -502,15 +608,46 @@ export async function collectPolymarketProbabilitySample(market, scheduledAt, sa
       ok: sample.quality !== "missing",
       source: POLYMARKET_5M_BTC_SOURCE.probabilitySource,
       quality: sample.quality,
+      dataDelayMs: sample.dataDelayMs,
+      availabilityStatus: sample.availabilityStatus,
     };
   } catch (error) {
+    const errorType = error.name === "AbortError" ? "timeout" : "polymarket_probability_fetch_error";
+    const errorMessage = error.message || String(error);
+    let missingSample = {
+      quality: "missing",
+      availabilityStatus: availabilityStatusForError(errorType, errorMessage),
+      dataDelayMs: dataDelayMs(scheduledAt),
+    };
+
+    try {
+      missingSample = await insertMissingProbabilitySample(market, scheduledAt, sampleType, {
+        errorType,
+        errorMessage,
+      });
+    } catch (insertError) {
+      await recordError({
+        marketId: market.id,
+        source: POLYMARKET_5M_BTC_SOURCE.probabilitySource,
+        errorType: "polymarket_missing_sample_insert_error",
+        message: insertError.message || String(insertError),
+      });
+    }
+
     await recordError({
       marketId: market.id,
       source: POLYMARKET_5M_BTC_SOURCE.probabilitySource,
-      errorType: error.name === "AbortError" ? "timeout" : "polymarket_probability_fetch_error",
-      message: error.message || String(error),
+      errorType,
+      message: errorMessage,
     });
-    return { ok: false, source: POLYMARKET_5M_BTC_SOURCE.probabilitySource, error };
+    return {
+      ok: false,
+      source: POLYMARKET_5M_BTC_SOURCE.probabilitySource,
+      quality: missingSample.quality,
+      availabilityStatus: missingSample.availabilityStatus,
+      dataDelayMs: missingSample.dataDelayMs,
+      error,
+    };
   }
 }
 

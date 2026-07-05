@@ -251,6 +251,7 @@ export function slugForMarket(market) {
 
 export function shouldCollectPolymarketProbabilitySample(market, scheduledAt, sampleType) {
   const scheduledMs = scheduledAt.getTime();
+  if (sampleType === "preopen") return scheduledMs < market.startMs;
   return sampleType !== "close" && scheduledMs >= market.startMs && scheduledMs < market.endMs;
 }
 
@@ -721,8 +722,10 @@ export async function getPolymarketProbabilitySampleStats(market) {
       from polymarket_probability_samples
       where source = $1
         and market_id = $2
+        and scheduled_at >= $3
+        and scheduled_at < $4
     `,
-    [POLYMARKET_5M_BTC_SOURCE.probabilitySource, market.id]
+    [POLYMARKET_5M_BTC_SOURCE.probabilitySource, market.id, market.start, market.end]
   );
 
   return result.rows[0] || null;

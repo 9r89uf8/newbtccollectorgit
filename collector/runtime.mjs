@@ -230,6 +230,22 @@ async function collectNextMarketOpeningPolymarketSample(market, scheduledAt) {
   return result;
 }
 
+async function collectUpcomingPolymarketPreopenSample(market, scheduledAt) {
+  if (!ENABLE_POLYMARKET_BTC_5M) {
+    return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.probabilitySource, skipped: true };
+  }
+
+  const nextMarket = getNextMarketAfter(market);
+  const leadMs = nextMarket.startMs - scheduledAt.getTime();
+  if (leadMs <= 0 || leadMs > POLYMARKET_METADATA_PREFETCH_LEAD_MS) {
+    return { ok: true, source: POLYMARKET_5M_BTC_SOURCE.probabilitySource, skipped: true };
+  }
+
+  await upsertMarket(nextMarket);
+  await prefetchPolymarketMarketMetadata(nextMarket, scheduledAt.getTime());
+  return collectPolymarketProbabilitySample(nextMarket, scheduledAt, "preopen");
+}
+
 async function collectScheduledPolymarketChainlinkBtcPriceSamples(market, scheduledAt, sampleType) {
   if (sampleType !== "close" || scheduledAt.getTime() !== market.endMs) {
     return collectPolymarketChainlinkBtcPriceSample(market, scheduledAt, sampleType);
@@ -577,7 +593,10 @@ export async function runCollector() {
       continue;
     }
 
-    await collectScheduledData(market, scheduledAt, sampleType);
+    await Promise.all([
+      collectScheduledData(market, scheduledAt, sampleType),
+      collectUpcomingPolymarketPreopenSample(market, scheduledAt),
+    ]);
     if (scheduledMs === market.startMs) {
       schedulePolymarketOpeningRetry(market, scheduledAt);
     }

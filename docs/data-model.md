@@ -162,10 +162,11 @@ btc-updown-5m-<utc_start_epoch_seconds>
 
 The slug epoch defines the 5 minute UTC window. Gamma `startDate` and `startDateIso` are treated as Polymarket creation/series metadata, not as the collector market start time.
 
-Probability samples use the same pre-close cadence as the existing collector and do not include a close-boundary sample for the market that is ending. At the close/open boundary, the collector also tries to write the next market opening probability row and retries that opening timestamp for up to 20 seconds if Polymarket is not ready yet:
+Probability samples use the same in-window cadence as the existing collector and do not include a close-boundary sample for the market that is ending. When the next market is inside the metadata prefetch lead window, the collector also stores upcoming-market CLOB midpoint rows before start with `sample_type = preopen`. At the close/open boundary, the collector tries to write the next market opening probability row and retries that opening timestamp for up to 20 seconds if Polymarket is not ready yet:
 
 | Window offset | Frequency | Sample type |
 | --- | --- | --- |
+| Before `0s`, inside the metadata prefetch lead window | Collector schedule while the prior market is active | `preopen` |
 | `0s` through `275s` | Every 5 seconds | `normal` |
 | `280s` through `299s` | Every 1 second | `final_ramp` |
 

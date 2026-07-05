@@ -101,6 +101,8 @@ POLYMARKET_METADATA_PREFETCH_LEAD_MS=60000
 
 Prefetch is best-effort. It can cache the next market's Up and Down CLOB token ids before the market opens, which allows the boundary sample to succeed immediately. If Polymarket has not exposed the market or token ids yet, the prefetch fails quietly and the collector tries again on later scheduled samples.
 
+When the next market is inside the prefetch lead window, the collector also samples the upcoming market's CLOB midpoints before the market starts and stores those rows as `sample_type = preopen`. These rows answer: "what was Polymarket pricing for the upcoming market before the BTC 5 minute window began?" They are not used as Binance labels and they are not the Chainlink `price_to_beat`.
+
 ## Why Some Polymarket Probability Series Start Late
 
 Some Polymarket 5 minute Up/Down markets do not expose usable Up/Down probabilities immediately at the UTC start boundary. In practice, the CLOB midpoint data can appear 10 to 15 seconds after the market has already started.
@@ -148,7 +150,7 @@ There is also a short boundary close grace path. If the collector enters a new m
 | Binance Futures WebSocket summaries | Continuous 1-second buckets keep writing while the process is running. | A stale WebSocket can mark the current market incomplete. |
 | Binance Futures aggregate trades | Not collected at market start; fetched after the market closes. | Page-limit or request failures make derived trade-flow rows partial. |
 | Polymarket Chainlink BTC RTDS | Latest tick is written for both previous close and next open. | Missing or stale latest tick sets row quality to `missing` or `partial`. |
-| Polymarket Up/Down probabilities | Collector tries to write a `0s` next-market sample using CLOB midpoints and retries that opening row for up to 20 seconds. | If the opening quote arrives late, the row is marked `delayed_open` with `data_delay_ms`; otherwise missing attempts remain `missing`. |
+| Polymarket Up/Down probabilities | Collector samples upcoming-market CLOB midpoints before start as `preopen`, then tries to write a `0s` opening sample and retries that opening row for up to 20 seconds. | If the opening quote arrives late, the row is marked `delayed_open` with `data_delay_ms`; otherwise missing attempts remain `missing`. |
 | Polymarket Gamma settlement metadata | Prefetched before start when possible and refreshed after close. | Official `price_to_beat`, `end_price`, and outcome can appear after close and are refreshed later. |
 
 ## Practical Reading

@@ -211,7 +211,7 @@ create table if not exists polymarket_probability_samples (
   slug text not null,
   scheduled_at timestamptz not null,
   collected_at timestamptz not null default now(),
-  sample_type text not null check (sample_type in ('normal', 'final_ramp')),
+  sample_type text not null check (sample_type in ('preopen', 'normal', 'final_ramp')),
   up_token_id text,
   down_token_id text,
   up_probability numeric(20, 12),
@@ -234,6 +234,13 @@ alter table polymarket_probability_samples
   alter column down_token_id drop not null,
   add column if not exists data_delay_ms integer,
   add column if not exists availability_status text;
+
+alter table polymarket_probability_samples
+  drop constraint if exists polymarket_probability_samples_sample_type_check;
+
+alter table polymarket_probability_samples
+  add constraint polymarket_probability_samples_sample_type_check
+    check (sample_type in ('preopen', 'normal', 'final_ramp'));
 
 alter table polymarket_probability_samples
   drop constraint if exists polymarket_probability_samples_availability_status_check;

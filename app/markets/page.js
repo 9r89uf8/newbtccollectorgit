@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getMarketsForUtcDay } from "@/lib/marketListData.js";
+import MarketExportLink from "../MarketExportLink.js";
 
 export const dynamic = "force-dynamic";
 
@@ -183,12 +184,13 @@ export default async function MarketsPage({ searchParams }) {
                 <th>Polymarket BTC</th>
                 <th>Polymarket outcome</th>
                 <th>Label quality</th>
+                <th>Export</th>
               </tr>
             </thead>
             <tbody>
               {data.markets.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="empty-cell">No markets for this UTC day.</td>
+                  <td colSpan="8" className="empty-cell">No markets for this UTC day.</td>
                 </tr>
               ) : (
                 data.markets.map((market) => {
@@ -227,6 +229,7 @@ export default async function MarketsPage({ searchParams }) {
                           <span className={`status-pill ${statusClass(polymarketQuality)}`}>chainlink {polymarketQuality}</span>
                         </div>
                       </td>
+                      <td><MarketExportLink marketId={market.id} compact /></td>
                     </tr>
                   );
                 })

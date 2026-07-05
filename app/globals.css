@@ -1127,3 +1127,31 @@ td strong {
 .chart-help-note li + li {
   margin-top: 6px;
 }
+.download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid #9bbcf2;
+  border-radius: 6px;
+  background: var(--blue-bg);
+  color: var(--blue);
+  font-size: 0.84rem;
+  font-weight: 760;
+  line-height: 1;
+  padding: 0 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.download-link:hover {
+  border-color: var(--blue);
+  background: #ffffff;
+  text-decoration: none;
+}
+
+.download-link-compact {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}

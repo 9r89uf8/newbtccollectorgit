@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getDashboardData } from "@/lib/dashboardData.js";
+import MarketExportLink from "./MarketExportLink.js";
 export const dynamic = "force-dynamic";
 
 function formatUtc(value) {
@@ -211,12 +212,13 @@ function MarketRows({ markets }) {
               <th>Polymarket BTC</th>
               <th>Polymarket outcome</th>
               <th>Reference quality</th>
+              <th>Export</th>
             </tr>
           </thead>
           <tbody>
             {markets.length === 0 ? (
               <tr>
-                <td colSpan="7" className="empty-cell">No markets created yet.</td>
+                <td colSpan="8" className="empty-cell">No markets created yet.</td>
               </tr>
             ) : (
               markets.map((market) => {
@@ -255,6 +257,7 @@ function MarketRows({ markets }) {
                         <span className={`status-pill ${statusClass(polymarketQuality)}`}>chainlink {polymarketQuality}</span>
                       </div>
                     </td>
+                    <td><MarketExportLink marketId={market.id} compact /></td>
                   </tr>
                 );
               })

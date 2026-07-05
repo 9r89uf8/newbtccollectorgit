@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMarketDetailData } from "@/lib/marketDetailData.js";
+import MarketExportLink from "../../MarketExportLink.js";
 import MarketMicrostructureChart from "./MarketMicrostructureChart.js";
 
 export const dynamic = "force-dynamic";
@@ -996,6 +997,7 @@ export default async function MarketDetailPage({ params }) {
           <p className="detail-market-id">{data.market.id}</p>
         </div>
         <div className="heartbeat-meta">
+          <MarketExportLink marketId={data.market.id} />
           <span className={`status-pill ${statusClass(data.market.status)}`}>{data.market.status}</span>
           <span>{data.market.symbol}</span>
         </div>

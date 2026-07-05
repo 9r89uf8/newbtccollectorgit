@@ -426,7 +426,7 @@ function buildTooltip(params) {
       ${row("BTC price", "BTC price", formatPrice)}
       ${row("Chainlink BTC", "Chainlink BTC", formatPrice)}
       ${row("Net taker", "Net taker", formatCompactUsd, 2)}
-      ${row("CVD", "CVD", formatCompactUsd, 2)}
+      ${row("CVD 5m", "CVD", formatCompactUsd, 2)}
       ${row("CVD 30s", "CVD rolling 30s", formatSignedCompactUsd, 2)}
       ${row("Pressure sum", "Microprice pressure", (value) => formatDecimal(value, 1))}
       ${detailText("Behavior", "Microprice pressure", 2)}

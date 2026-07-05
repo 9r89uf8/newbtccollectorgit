@@ -749,7 +749,7 @@ function BucketTable({ buckets }) {
               <th>Window</th>
               <th>Move</th>
               <th>Net taker</th>
-              <th>CVD</th>
+              <th>CVD 5m</th>
               <th>5b signal</th>
               <th>Taker imb.</th>
               <th>Book imb.</th>

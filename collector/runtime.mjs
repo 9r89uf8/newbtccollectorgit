@@ -31,6 +31,7 @@ import {
 import { collectFuturesBasisSamplesForMarket } from "./futuresBasisSamples.mjs";
 import { startFuturesWebSocketSummaryCollector } from "./futuresWebSocketSummaries.mjs";
 import { startLiveDashboardServer } from "./liveServer.mjs";
+import { startLivePositioningCollector } from "./livePositioning.mjs";
 import { startLiveStateFlusher } from "./liveState.mjs";
 import { writeMarketBehaviorLabel } from "./marketBehaviorLabels.mjs";
 import { writeMarketClassification } from "./marketClassifications.mjs";
@@ -76,6 +77,7 @@ let polymarketChainlinkBtcPriceCollector = null;
 let polymarketClobLiveCollector = null;
 let liveStateFlusher = null;
 let liveDashboardServer = null;
+let livePositioningCollector = null;
 const ensuredBoundaryCloseStarts = new Set();
 const BOUNDARY_CLOSE_GRACE_MS = 15000;
 const pendingMarketClosures = new Map();
@@ -544,6 +546,10 @@ export async function runCollector() {
     liveDashboardServer = startLiveDashboardServer();
   }
 
+  if (!livePositioningCollector) {
+    livePositioningCollector = startLivePositioningCollector();
+  }
+
   if (
     ENABLE_FUTURES_MICROSTRUCTURE &&
     ENABLE_FUTURES_WEBSOCKET_SUMMARIES &&
@@ -650,6 +656,10 @@ export async function shutdown(signal) {
     if (liveDashboardServer) {
       await liveDashboardServer.stop();
       liveDashboardServer = null;
+    }
+    if (livePositioningCollector) {
+      await livePositioningCollector.stop();
+      livePositioningCollector = null;
     }
     await heartbeat(COLLECTOR_NAME, "stopped", null, `stopped by ${signal}`);
   } finally {

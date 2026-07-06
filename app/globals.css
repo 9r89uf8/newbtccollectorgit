@@ -1182,6 +1182,168 @@ td strong {
   padding: 16px 18px;
 }
 
+
+.live-ticket {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+  min-width: 0;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 16px 14px;
+}
+
+.live-ticket-main {
+  min-width: 0;
+}
+
+.live-ticket-title-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.live-btc-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 7px;
+  background: #ff8a00;
+  color: #ffffff;
+  font-size: 2.4rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.live-ticket-title-copy {
+  min-width: 0;
+}
+
+.live-ticket-title-copy h1 {
+  margin: 0;
+  color: #0b1220;
+  font-size: 1.45rem;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.live-ticket-title-copy p {
+  margin: 7px 0 0;
+  color: #667085;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.live-ticket-price-row {
+  display: flex;
+  align-items: end;
+  gap: 20px;
+  min-width: 0;
+  margin-top: 20px;
+}
+
+.live-ticket-price {
+  min-width: 0;
+}
+
+.live-ticket-price span {
+  display: flex;
+  align-items: center;
+  min-height: 16px;
+  color: #98a2b3;
+  font-size: 0.73rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.live-ticket-price strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 1.45rem;
+  line-height: 1;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.live-ticket-beat strong {
+  color: #7b8494;
+}
+
+.live-ticket-current span,
+.live-ticket-current strong {
+  color: #ff8a00;
+}
+
+.live-ticket-diff strong {
+  font-size: 1.15rem;
+}
+
+.live-ticket-divider {
+  width: 1px;
+  height: 40px;
+  background: #d9dfe8;
+}
+
+.live-ticket-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  gap: 24px;
+}
+
+.live-ticket-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.live-ticket-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 20px;
+  color: #111827;
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.live-ticket-countdown {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+  color: #f04444;
+}
+
+.live-ticket-countdown div {
+  text-align: center;
+}
+
+.live-ticket-countdown strong {
+  display: block;
+  font-size: 1.55rem;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.live-ticket-countdown span {
+  display: block;
+  margin-top: 4px;
+  color: #667085;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0;
+}
 .live-source-strip {
   flex-wrap: wrap;
   color: var(--muted);
@@ -1193,7 +1355,7 @@ td strong {
 }
 
 .live-metrics-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .live-grid {
@@ -1247,6 +1409,7 @@ td strong {
   margin-top: 16px;
 }
 
+
 .live-chart-frame {
   width: 100%;
   max-width: 100%;
@@ -1269,8 +1432,37 @@ td strong {
   stroke-dasharray: 5 5;
 }
 
+
 .chart-axis-label-right {
   text-anchor: end;
+}
+.chart-axis-left-tick {
+  stroke: #475467;
+  stroke-width: 1.3;
+  opacity: 0.75;
+}
+
+.chart-axis-label-left-strong {
+  fill: #344054;
+  stroke: #fbfcfe;
+  stroke-width: 3px;
+  paint-order: stroke;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+.chart-axis-right-tick {
+  stroke: #c11574;
+  stroke-width: 1.3;
+  opacity: 0.7;
+}
+
+.chart-axis-label-right-strong {
+  fill: #c11574;
+  stroke: #fbfcfe;
+  stroke-width: 3px;
+  paint-order: stroke;
+  font-size: 0.78rem;
+  font-weight: 900;
 }
 
 .live-chart-legend {
@@ -1333,9 +1525,41 @@ td strong {
     flex-direction: column;
   }
 
+  .live-ticket {
+    flex-direction: column;
+  }
+
+  .live-ticket-side {
+    align-items: stretch;
+    flex-direction: row;
+  }
+
+  .live-ticket-price-row {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .live-ticket-divider {
+    display: none;
+  }
+
+  .live-ticket-countdown {
+    justify-content: flex-end;
+  }
+
   .live-grid,
   .live-metrics-grid,
-  .live-field-grid {
+  .live-field-grid,
+  .live-price-compare {
     grid-template-columns: 1fr;
   }
 }
+
+.live-probability-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+

@@ -1,7 +1,7 @@
+import { getSnapshotFallback, LIVE_COLLECTOR_URL, withPriceToBeatFallback } from "../liveData.js";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const LIVE_COLLECTOR_URL = (process.env.LIVE_COLLECTOR_URL || "http://127.0.0.1:8787").replace(/\/+$/, "");
 
 export async function GET() {
   try {
@@ -10,22 +10,20 @@ export async function GET() {
     });
 
     if (!response.ok) {
-      return Response.json(
-        { ok: false, error: `collector returned HTTP ${response.status}` },
-        { status: 503 }
-      );
+      const fallback = await getSnapshotFallback(`collector returned HTTP ${response.status}`);
+      return Response.json(fallback, {
+        headers: { "cache-control": "no-store" },
+      });
     }
 
-    const snapshot = await response.json();
+    const snapshot = await withPriceToBeatFallback(await response.json());
     return Response.json(snapshot, {
-      headers: {
-        "cache-control": "no-store",
-      },
+      headers: { "cache-control": "no-store" },
     });
   } catch (error) {
-    return Response.json(
-      { ok: false, error: error.message || String(error) },
-      { status: 503 }
-    );
+    const fallback = await getSnapshotFallback(error.message || String(error));
+    return Response.json(fallback, {
+      headers: { "cache-control": "no-store" },
+    });
   }
 }

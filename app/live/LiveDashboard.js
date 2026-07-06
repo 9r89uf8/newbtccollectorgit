@@ -26,6 +26,46 @@ function formatUtc(value) {
   }).format(date) + " UTC";
 }
 
+function stripMeridiem(value) {
+  const compact = String(value || "").replace(/\s+/g, "");
+  const match = compact.match(/^(.*?)(AM|PM)$/i);
+  return match ? { time: match[1], meridiem: match[2].toUpperCase() } : { time: compact, meridiem: "" };
+}
+
+function formatMarketWindowEt(startValue, endValue) {
+  if (!startValue || !endValue) return "-";
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return "-";
+
+  const date = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "long",
+    day: "numeric",
+  }).format(start);
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  const startParts = stripMeridiem(timeFormatter.format(start));
+  const endParts = stripMeridiem(timeFormatter.format(end));
+  const sameMeridiem = startParts.meridiem && startParts.meridiem === endParts.meridiem;
+  const range = sameMeridiem
+    ? `${startParts.time}-${endParts.time}${endParts.meridiem}`
+    : `${startParts.time}${startParts.meridiem}-${endParts.time}${endParts.meridiem}`;
+
+  return `${date}, ${range} ET`;
+}
+
+function countdownParts(secondsRemaining) {
+  const seconds = Math.max(0, Math.floor(readNumber(secondsRemaining) ?? 0));
+  return {
+    minutes: String(Math.floor(seconds / 60)).padStart(2, "0"),
+    seconds: String(seconds % 60).padStart(2, "0"),
+  };
+}
 function formatPrice(value) {
   const number = readNumber(value);
   if (number === null) return "-";
@@ -35,6 +75,18 @@ function formatPrice(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(number);
+}
+
+function formatSignedDollarDifference(value) {
+  const number = readNumber(value);
+  if (number === null) return "-";
+  const formatted = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.abs(number));
+  return `${number >= 0 ? "+" : "-"}${formatted}`;
 }
 
 function formatCompactUsd(value) {
@@ -48,16 +100,42 @@ function formatCompactUsd(value) {
   }).format(number);
 }
 
+function formatSignedCompactUsd(value) {
+  const number = readNumber(value);
+  if (number === null) return "-";
+  if (number === 0) return formatCompactUsd(0);
+  const formatted = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(Math.abs(number));
+  return `${number > 0 ? "+" : "-"}${formatted}`;
+}
+
 function formatNumber(value, digits = 2) {
   const number = readNumber(value);
   if (number === null) return "-";
   return number.toFixed(digits);
 }
 
+function formatSignedNumber(value, digits = 1) {
+  const number = readNumber(value);
+  if (number === null) return "-";
+  if (number === 0) return number.toFixed(digits);
+  return `${number > 0 ? "+" : ""}${number.toFixed(digits)}`;
+}
+
 function formatPercent(value, digits = 1) {
   const number = readNumber(value);
   if (number === null) return "-";
   return `${(number * 100).toFixed(digits)}%`;
+}
+
+function formatPercentValue(value, digits = 3) {
+  const number = readNumber(value);
+  if (number === null) return "-";
+  return `${number.toFixed(digits)}%`;
 }
 
 function formatBps(value) {
@@ -91,7 +169,18 @@ function marketLink(snapshot) {
   return snapshot?.market?.id ? `/markets/${encodeURIComponent(snapshot.market.id)}` : "/markets";
 }
 
+function bookImbalance(snapshot) {
+  const reportedImbalance = readNumber(snapshot?.binance?.bookImbalance);
+  if (reportedImbalance !== null) return reportedImbalance;
+  const bestBidQty = readNumber(snapshot?.binance?.bestBidQty);
+  const bestAskQty = readNumber(snapshot?.binance?.bestAskQty);
+  if (bestBidQty === null || bestAskQty === null) return null;
+  const depth = bestBidQty + bestAskQty;
+  return depth > 0 ? (bestBidQty - bestAskQty) / depth : null;
+}
 function micropriceLean(snapshot) {
+  const reportedLean = readNumber(snapshot?.binance?.micropriceLean);
+  if (reportedLean !== null) return reportedLean;
   const mid = readNumber(snapshot?.binance?.mid);
   const microprice = readNumber(snapshot?.binance?.microprice);
   const spreadBps = readNumber(snapshot?.binance?.spreadBps);
@@ -107,13 +196,20 @@ function snapshotPoint(snapshot) {
     marketId: snapshot.market?.id || "unknown",
     binanceMid: readNumber(snapshot.binance?.mid),
     chainlinkPrice: readNumber(snapshot.chainlink?.price),
+    priceToBeat: readNumber(snapshot.polymarket?.priceToBeat),
     normalizedUp: readNumber(snapshot.polymarket?.normalizedUp),
     normalizedDown: readNumber(snapshot.polymarket?.normalizedDown),
     cvd: readNumber(snapshot.flow?.cvdMarketQuote),
     netTaker: readNumber(snapshot.flow?.netTakerQuote1s),
+    rollingCvd30s: readNumber(snapshot.flow?.rollingNet30s),
     rollingImbalance: readNumber(snapshot.flow?.rollingImbalance30s),
     liquidationNet: readNumber(snapshot.liquidations?.netQuote1s),
     micropriceLean: micropriceLean(snapshot),
+    bookImbalance: bookImbalance(snapshot),
+    micropressure: readNumber(snapshot.binance?.micropricePressureMarket),
+    openInterestQuote: readNumber(snapshot.position?.openInterestQuote),
+    openInterestChangeQuote: readNumber(snapshot.position?.openInterestChangeQuote),
+    openInterestChangePct: readNumber(snapshot.position?.openInterestChangePct),
   };
 }
 
@@ -122,6 +218,12 @@ function addPoint(points, snapshot) {
   if (!point) return points;
   const last = points[points.length - 1];
   const sameMarket = last?.marketId === point.marketId;
+  const previousPoint = sameMarket ? last : null;
+  if (point.micropressure === null && point.micropriceLean !== null) {
+    const previousPressure = readNumber(previousPoint?.micropressure) ?? 0;
+    const elapsedSeconds = previousPoint?.time ? Math.max(0, Math.min(5, (point.time - previousPoint.time) / 1000)) : 0;
+    point.micropressure = previousPressure + point.micropriceLean * elapsedSeconds;
+  }
   const next = sameMarket ? points.slice() : [];
   if (next[next.length - 1]?.time === point.time) {
     next[next.length - 1] = point;
@@ -192,6 +294,11 @@ function chartBounds(points, keys, fixedMin, fixedMax) {
   return { min, max };
 }
 
+function axisTicks(bounds, count = 5) {
+  if (!bounds || count <= 1) return [];
+  const step = (bounds.max - bounds.min) / (count - 1);
+  return Array.from({ length: count }, (_, index) => bounds.max - step * index);
+}
 function xForTime(time, start, end) {
   if (end <= start) return CHART_PAD;
   return CHART_PAD + ((time - start) / (end - start)) * (CHART_WIDTH - CHART_PAD * 2);
@@ -214,12 +321,29 @@ function linePath(points, key, start, end, min, max) {
   return parts.join(" ");
 }
 
-function LineChart({ points, series, min, max }) {
+function LineChart({
+  points,
+  series,
+  min,
+  max,
+  rightMin,
+  rightMax,
+  leftTickCount = 0,
+  leftFormatter = formatNumber,
+  rightFormatter = formatNumber,
+}) {
   const validPoints = points.filter((point) => series.some((item) => readNumber(point[item.key]) !== null));
+  const leftSeries = series.filter((item) => item.axis !== "right");
+  const rightSeries = series.filter((item) => item.axis === "right");
   const start = validPoints[0]?.time || Date.now() - 60_000;
   const end = validPoints[validPoints.length - 1]?.time || Date.now();
-  const bounds = chartBounds(validPoints, series.map((item) => item.key), min, max);
-  const zeroY = bounds.min < 0 && bounds.max > 0 ? yForValue(0, bounds.min, bounds.max) : null;
+  const leftBounds = chartBounds(validPoints, leftSeries.map((item) => item.key), min, max);
+  const rightBounds = rightSeries.length > 0
+    ? chartBounds(validPoints, rightSeries.map((item) => item.key), rightMin, rightMax)
+    : null;
+  const leftZeroY = leftBounds.min < 0 && leftBounds.max > 0 ? yForValue(0, leftBounds.min, leftBounds.max) : null;
+  const leftAxisTicks = leftTickCount > 1 ? axisTicks(leftBounds, leftTickCount) : [];
+  const rightAxisTicks = rightBounds ? axisTicks(rightBounds, 5) : [];
 
   if (validPoints.length === 0) {
     return <div className="live-empty-chart">Waiting for live samples.</div>;
@@ -233,25 +357,117 @@ function LineChart({ points, series, min, max }) {
           const y = CHART_PAD + tick * (CHART_HEIGHT - CHART_PAD * 2);
           return <line key={tick} x1={CHART_PAD} x2={CHART_WIDTH - CHART_PAD} y1={y} y2={y} className="chart-grid-line" />;
         })}
-        {zeroY !== null ? <line x1={CHART_PAD} x2={CHART_WIDTH - CHART_PAD} y1={zeroY} y2={zeroY} className="chart-zero-line" /> : null}
+        {leftZeroY !== null ? <line x1={CHART_PAD} x2={CHART_WIDTH - CHART_PAD} y1={leftZeroY} y2={leftZeroY} className="chart-zero-line" /> : null}
         {series.map((item) => {
+          const bounds = item.axis === "right" && rightBounds ? rightBounds : leftBounds;
           const path = linePath(validPoints, item.key, start, end, bounds.min, bounds.max);
-          return path ? <path key={item.key} d={path} fill="none" stroke={item.color} strokeWidth="2.3" /> : null;
+          return path ? (
+            <path
+              key={item.key}
+              d={path}
+              fill="none"
+              stroke={item.color}
+              strokeWidth={item.strokeWidth || "2.3"}
+              strokeDasharray={item.strokeDasharray || undefined}
+              strokeLinecap="round"
+              opacity={item.opacity || 1}
+            />
+          ) : null;
         })}
         <text x={CHART_PAD} y={CHART_HEIGHT - 9} className="chart-axis-label">{formatUtc(start)}</text>
         <text x={CHART_WIDTH - CHART_PAD} y={CHART_HEIGHT - 9} className="chart-axis-label chart-axis-label-right">{formatUtc(end)}</text>
-        <text x={CHART_PAD} y="20" className="chart-axis-label">{formatNumber(bounds.max, 2)}</text>
-        <text x={CHART_PAD} y={CHART_HEIGHT - CHART_PAD + 14} className="chart-axis-label">{formatNumber(bounds.min, 2)}</text>
+        {leftAxisTicks.length > 0 ? (
+          <g className="chart-axis-left-scale">
+            {leftAxisTicks.map((value, index) => {
+              const y = yForValue(value, leftBounds.min, leftBounds.max);
+              const labelY = Math.min(CHART_HEIGHT - CHART_PAD + 14, Math.max(20, y + 4));
+              return (
+                <g key={`${index}-${value}`}>
+                  <line x1="4" x2={CHART_PAD} y1={y} y2={y} className="chart-axis-left-tick" />
+                  <text x="6" y={labelY} className="chart-axis-label chart-axis-label-left-strong">{leftFormatter(value)}</text>
+                </g>
+              );
+            })}
+          </g>
+        ) : (
+          <>
+            <text x={CHART_PAD} y="20" className="chart-axis-label">{leftFormatter(leftBounds.max)}</text>
+            <text x={CHART_PAD} y={CHART_HEIGHT - CHART_PAD + 14} className="chart-axis-label">{leftFormatter(leftBounds.min)}</text>
+          </>
+        )}
+        {rightBounds ? (
+          <g className="chart-axis-right-scale">
+            {rightAxisTicks.map((value, index) => {
+              const y = yForValue(value, rightBounds.min, rightBounds.max);
+              const labelY = Math.min(CHART_HEIGHT - CHART_PAD + 14, Math.max(20, y + 4));
+              return (
+                <g key={`${index}-${value}`}>
+                  <line x1={CHART_WIDTH - CHART_PAD} x2={CHART_WIDTH - 4} y1={y} y2={y} className="chart-axis-right-tick" />
+                  <text x={CHART_WIDTH - 6} y={labelY} className="chart-axis-label chart-axis-label-right chart-axis-label-right-strong">{rightFormatter(value)}</text>
+                </g>
+              );
+            })}
+          </g>
+        ) : null}
       </svg>
       <div className="live-chart-legend">
         {series.map((item) => (
-          <span key={item.key}><b style={{ backgroundColor: item.color }} />{item.label}</span>
+          <span key={item.key}><b style={{ backgroundColor: item.color }} />{item.label}{item.axis === "right" ? " (right)" : ""}</span>
         ))}
       </div>
     </div>
   );
 }
 
+function MarketTicket({ snapshot, market, priceToBeat, currentPrice, difference }) {
+  const diff = readNumber(difference);
+  const direction = diff === null ? "" : diff >= 0 ? "Up" : "Down";
+  const directionClass = diff === null ? "direction-flat" : diff >= 0 ? "number-positive" : "number-negative";
+  const differenceText = diff === null ? "-" : `${formatSignedDollarDifference(diff)} ${direction}`;
+  const countdown = countdownParts(market.secondsRemaining);
+
+  return (
+    <section className="live-ticket" aria-label="Current BTC market">
+      <div className="live-ticket-main">
+        <div className="live-ticket-title-row">
+          <div className="live-btc-icon" aria-hidden="true">&#8383;</div>
+          <div className="live-ticket-title-copy">
+            <h1>BTC Up or Down 5m</h1>
+            <p>{formatMarketWindowEt(market.startTime, market.endTime)}</p>
+          </div>
+        </div>
+
+        <div className="live-ticket-price-row">
+          <div className="live-ticket-price live-ticket-beat">
+            <span>Price To Beat</span>
+            <strong>{formatPrice(priceToBeat)}</strong>
+          </div>
+          <div className="live-ticket-divider" aria-hidden="true" />
+          <div className="live-ticket-price live-ticket-current">
+            <span>Current Price</span>
+            <strong>{formatPrice(currentPrice)}</strong>
+          </div>
+          <div className="live-ticket-price live-ticket-diff">
+            <span>Difference</span>
+            <strong className={directionClass}>{differenceText}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="live-ticket-side">
+        <div className="live-ticket-actions">
+          <Link href={marketLink(snapshot)} aria-label="Open market detail">&lt;/&gt;</Link>
+          <Link href={marketLink(snapshot)} aria-label="Copy market link">#</Link>
+          <Link href={marketLink(snapshot)} aria-label="Bookmark market">[]</Link>
+        </div>
+        <div className="live-ticket-countdown" aria-label={`${countdown.minutes} minutes ${countdown.seconds} seconds remaining`}>
+          <div><strong>{countdown.minutes}</strong><span>MINS</span></div>
+          <div><strong>{countdown.seconds}</strong><span>SECS</span></div>
+        </div>
+      </div>
+    </section>
+  );
+}
 function SourceStrip({ snapshot, connection }) {
   const staleSources = snapshot?.collector?.staleSources || [];
   return (
@@ -339,46 +555,138 @@ export default function LiveDashboard() {
   const binance = snapshot.binance || {};
   const polymarket = snapshot.polymarket || {};
   const chainlink = snapshot.chainlink || {};
+  const position = snapshot.position || {};
   const flow = snapshot.flow || {};
   const liquidations = snapshot.liquidations || {};
-  const lean = micropriceLean(snapshot);
+  const book = bookImbalance(snapshot);
+  const micropressure = readNumber(binance.micropricePressureMarket) ?? readNumber(latestPoint?.micropressure);
+  const priceToBeat = readNumber(polymarket.priceToBeat);
+  const currentBtcPrice = readNumber(chainlink.price) ?? readNumber(binance.mid);
+  const priceDifference = priceToBeat !== null && currentBtcPrice !== null ? currentBtcPrice - priceToBeat : null;
 
   return (
     <>
+      <MarketTicket
+        snapshot={snapshot}
+        market={market}
+        priceToBeat={priceToBeat}
+        currentPrice={currentBtcPrice}
+        difference={priceDifference}
+      />
+      <section className="panel chart-panel detail-wide-panel live-chart-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">Live price</p>
+            <h2>Futures mid, Chainlink, and price to beat</h2>
+          </div>
+          <div className="live-probability-pills">
+            <span className="status-pill status-muted">{points.length} points</span>
+          </div>
+        </div>
+        <LineChart
+          points={points}
+          series={[
+            { key: "binanceMid", label: "Futures mid", color: "#175cd3" },
+            { key: "chainlinkPrice", label: "Chainlink", color: "#067647" },
+            { key: "priceToBeat", label: "Price to beat", color: "#b54708" },
+          ]}
+        />
+      </section>
+
+      <section className="panel chart-panel detail-wide-panel live-chart-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">Live Polymarket</p>
+            <h2>Normalized Up and Down</h2>
+          </div>
+          <div className="live-probability-pills">
+            <span className="status-pill status-good">Up {formatPercent(polymarket.normalizedUp)}</span>
+            <span className="status-pill status-bad">Down {formatPercent(polymarket.normalizedDown)}</span>
+          </div>
+        </div>
+        <LineChart
+          points={points}
+          min={0}
+          max={1}
+          series={[
+            { key: "normalizedUp", label: "Up", color: "#067647" },
+            { key: "normalizedDown", label: "Down", color: "#b42318" },
+          ]}
+        />
+      </section>
+
+      <section className="panel chart-panel detail-wide-panel live-chart-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">Live pressure</p>
+            <h2>Rolling imbalance and book imbalance</h2>
+          </div>
+        </div>
+        <LineChart
+          points={points}
+          min={-1}
+          max={1}
+          series={[
+            { key: "rollingImbalance", label: "Taker 30s", color: "#175cd3" },
+            { key: "bookImbalance", label: "Book imbalance", color: "#067647", strokeWidth: "2.6" },
+          ]}
+        />
+      </section>
+
+      <section className="panel chart-panel detail-wide-panel live-chart-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">Live flow pressure</p>
+            <h2>30s CVD, market CVD, and micropressure</h2>
+          </div>
+        </div>
+        <LineChart
+          points={points}
+          leftTickCount={5}
+          leftFormatter={formatSignedCompactUsd}
+          rightFormatter={formatSignedNumber}
+          series={[
+            { key: "rollingCvd30s", label: "30s CVD", color: "#175cd3" },
+            { key: "cvd", label: "Market CVD", color: "#b54708" },
+            { key: "micropressure", label: "Micropressure", color: "#c11574", axis: "right" },
+          ]}
+        />
+      </section>
+      <section className="panel chart-panel detail-wide-panel live-chart-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="panel-label">Live positioning</p>
+            <h2>Open interest change from market open</h2>
+          </div>
+          <div className="live-probability-pills">
+            <span className={`status-pill ${statusClass(position.quality)}`}>{position.quality || "waiting"}</span>
+          </div>
+        </div>
+        <LineChart
+          points={points}
+          leftTickCount={5}
+          leftFormatter={formatSignedCompactUsd}
+          series={[
+            { key: "openInterestChangeQuote", label: "OI change", color: "#7a5af8", strokeWidth: "2.6" },
+          ]}
+        />
+      </section>
       <SourceStrip snapshot={snapshot} connection={connection} />
       {error ? <p className="error-text live-error-text">{error}</p> : null}
-
-      <section className="metrics-grid detail-metrics-grid live-metrics-grid">
-        <Metric label="Seconds left" value={market.secondsRemaining ?? "-"} tone={market.status === "open" ? "good" : "warn"} />
-        <Metric label="Futures mid" value={formatPrice(binance.mid)} />
-        <Metric label="Up probability" value={formatPercent(polymarket.normalizedUp)} tone="warn" />
-        <Metric label="CVD market" value={formatCompactUsd(flow.cvdMarketQuote)} tone={readNumber(flow.cvdMarketQuote) >= 0 ? "good" : "bad"} />
-      </section>
-
-      <section className="panel live-market-panel">
-        <div>
-          <p className="panel-label">Current market</p>
-          <h2>{formatUtc(market.startTime)} to {formatUtc(market.endTime)}</h2>
-          <p className="detail-market-id">{market.id}</p>
-        </div>
-        <div className="heartbeat-meta">
-          <Link className="download-link" href={marketLink(snapshot)}>Market detail</Link>
-          <span className={`status-pill ${statusClass(market.status)}`}>{market.status}</span>
-          <span>{market.slug}</span>
-        </div>
-      </section>
-
       <div className="live-grid">
-        <DataCard label="Polymarket" title="Up and Down orderbook" status={polymarket.quality}>
+        <DataCard label="Polymarket" title="Live normalized percentages" status={polymarket.quality}>
           <FieldGrid rows={[
+            { label: "Live Up", value: formatPercent(polymarket.normalizedUp), className: "number-positive" },
+            { label: "Live Down", value: formatPercent(polymarket.normalizedDown), className: "number-negative" },
+            { label: "Price to beat", value: formatPrice(polymarket.priceToBeat) },
+            { label: "Up mid", value: formatPercent(polymarket.up?.mid) },
+            { label: "Down mid", value: formatPercent(polymarket.down?.mid) },
             { label: "Up bid", value: formatPercent(polymarket.up?.bid) },
             { label: "Up ask", value: formatPercent(polymarket.up?.ask) },
-            { label: "Up mid", value: formatPercent(polymarket.up?.mid) },
-            { label: "Up age", value: formatAge(polymarket.up?.ageMs) },
             { label: "Down bid", value: formatPercent(polymarket.down?.bid) },
             { label: "Down ask", value: formatPercent(polymarket.down?.ask) },
-            { label: "Norm up", value: formatPercent(polymarket.normalizedUp) },
             { label: "Raw sum", value: formatNumber(polymarket.probabilitySum, 3) },
+            { label: "Data age", value: formatAge(Math.max(readNumber(polymarket.up?.ageMs) ?? 0, readNumber(polymarket.down?.ageMs) ?? 0)) },
           ]} />
         </DataCard>
 
@@ -400,7 +708,21 @@ export default function LiveDashboard() {
             { label: "Mark", value: formatPrice(binance.markPrice) },
             { label: "Index", value: formatPrice(binance.indexPrice) },
             { label: "Funding", value: formatNumber(binance.fundingRate, 6) },
-            { label: "Lean", value: formatNumber(lean, 3), className: signedClass(lean) },
+            { label: "Book imbalance", value: formatNumber(book, 3), className: signedClass(book) },
+            { label: "Micropressure", value: formatNumber(micropressure, 2), className: signedClass(micropressure) },
+            { label: "Micro samples", value: binance.micropriceSampleCount1s ?? 0 },
+          ]} />
+        </DataCard>
+        <DataCard label="Positioning" title="Open interest" status={position.quality}>
+          <FieldGrid rows={[
+            { label: "OI notional", value: formatCompactUsd(position.openInterestQuote) },
+            { label: "OI BTC", value: formatNumber(position.openInterestBase, 3) },
+            { label: "OI change", value: formatSignedCompactUsd(position.openInterestChangeQuote), className: signedClass(position.openInterestChangeQuote) },
+            { label: "OI change %", value: formatPercentValue(position.openInterestChangePct), className: signedClass(position.openInterestChangePct) },
+            { label: "Open OI", value: formatCompactUsd(position.openInterestOpenQuote) },
+            { label: "Mark", value: formatPrice(position.markPrice) },
+            { label: "Premium", value: formatBps(position.premiumBps), className: signedClass(position.premiumBps) },
+            { label: "Age", value: formatAge(position.ageMs) },
           ]} />
         </DataCard>
 
@@ -408,6 +730,7 @@ export default function LiveDashboard() {
           <FieldGrid rows={[
             { label: "Net 1s", value: formatCompactUsd(flow.netTakerQuote1s), className: signedClass(flow.netTakerQuote1s) },
             { label: "Gross 1s", value: formatCompactUsd(flow.grossTakerQuote1s) },
+            { label: "30s CVD", value: formatCompactUsd(flow.rollingNet30s), className: signedClass(flow.rollingNet30s) },
             { label: "Trades 1s", value: flow.tradeCount1s ?? 0 },
             { label: "30s imbalance", value: formatNumber(flow.rollingImbalance30s, 3), className: signedClass(flow.rollingImbalance30s) },
             { label: "Market buy", value: formatCompactUsd(flow.marketTakerBuyQuote) },
@@ -427,58 +750,7 @@ export default function LiveDashboard() {
         </DataCard>
       </div>
 
-      <section className="panel chart-panel detail-wide-panel live-chart-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="panel-label">Live price</p>
-            <h2>Futures mid and Chainlink BTC</h2>
-          </div>
-          <span className="status-pill status-muted">{points.length} points</span>
-        </div>
-        <LineChart
-          points={points}
-          series={[
-            { key: "binanceMid", label: "Futures mid", color: "#175cd3" },
-            { key: "chainlinkPrice", label: "Chainlink", color: "#067647" },
-          ]}
-        />
-      </section>
-
-      <section className="panel chart-panel detail-wide-panel live-chart-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="panel-label">Live Polymarket</p>
-            <h2>Normalized Up and Down</h2>
-          </div>
-        </div>
-        <LineChart
-          points={points}
-          min={0}
-          max={1}
-          series={[
-            { key: "normalizedUp", label: "Up", color: "#067647" },
-            { key: "normalizedDown", label: "Down", color: "#b42318" },
-          ]}
-        />
-      </section>
-
-      <section className="panel chart-panel detail-wide-panel live-chart-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="panel-label">Live pressure</p>
-            <h2>Rolling imbalance and microprice lean</h2>
-          </div>
-        </div>
-        <LineChart
-          points={points}
-          min={-1}
-          max={1}
-          series={[
-            { key: "rollingImbalance", label: "Taker 30s", color: "#175cd3" },
-            { key: "micropriceLean", label: "Micro lean", color: "#b54708" },
-          ]}
-        />
-      </section>
     </>
   );
 }
+

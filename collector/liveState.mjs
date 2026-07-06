@@ -4,6 +4,7 @@ import {
   FUTURES_WS_SUMMARY_BUCKET_MS,
   LIVE_STATE_PERSIST_INTERVAL_MS,
   MARKET_MS,
+  POSITION_SAMPLE_INTERVAL_MS,
   POLYMARKET_RTDS_STALE_MS,
   SYMBOL,
 } from "./config.mjs";
@@ -14,7 +15,9 @@ const SECOND_MS = FUTURES_WS_SUMMARY_BUCKET_MS || 1000;
 const ROLLING_FLOW_WINDOW_MS = 30_000;
 const BINANCE_STALE_MS = 5_000;
 const POLYMARKET_STALE_MS = 10_000;
+const POSITION_STALE_MS = Math.max(POSITION_SAMPLE_INTERVAL_MS * 3, 15_000);
 const MAX_HISTORY_POINTS = 900;
+const PRICE_TO_BEAT_CHAINLINK_GRACE_MS = 20_000;
 
 const state = {
   market: null,
@@ -26,6 +29,8 @@ const state = {
     mid: null,
     spreadBps: null,
     microprice: null,
+    micropriceLean: null,
+    bookImbalance: null,
     bookEventTs: null,
     bookReceivedTs: null,
     eventLagMs: null,
@@ -44,11 +49,16 @@ const state = {
     ageMs: null,
     quality: "missing",
   },
+  position: createPositionState(),
   polymarket: {
     slug: null,
     conditionId: null,
     upTokenId: null,
     downTokenId: null,
+    priceToBeat: null,
+    endPrice: null,
+    winningOutcome: "unknown",
+    priceToBeatSource: null,
     up: createPolymarketSide(),
     down: createPolymarketSide(),
     normalizedUp: null,
@@ -61,6 +71,8 @@ const state = {
   flowHistory: [],
   marketFlow: createMarketFlowTotals(),
   continuousCvdQuote: 0,
+  micropricePressureMarket: 0,
+  micropricePressureContinuous: 0,
   collector: {
     startedAt: Date.now(),
     lastPersistedAt: null,
@@ -73,6 +85,26 @@ const state = {
   lagTimer: null,
 };
 
+function createPositionState() {
+  return {
+    openInterestBase: null,
+    openInterestQuote: null,
+    openInterestOpenBase: null,
+    openInterestOpenQuote: null,
+    openInterestChangeBase: null,
+    openInterestChangeQuote: null,
+    openInterestChangePct: null,
+    markPrice: null,
+    indexPrice: null,
+    premiumBps: null,
+    fundingRate: null,
+    nextFundingTime: null,
+    markExchangeTs: null,
+    openInterestExchangeTs: null,
+    receivedTs: null,
+    latencyMs: null,
+  };
+}
 function createPolymarketSide() {
   return {
     bid: null,
@@ -107,6 +139,10 @@ function createFlowBucket(startMs) {
     netTakerQuote: 0,
     grossTakerQuote: 0,
     tradeCount: 0,
+    micropriceLean: null,
+    micropriceSampleCount: 0,
+    micropricePressureDelta: 0,
+    micropricePressureFinalized: false,
     liquidationBuyQuote: 0,
     liquidationSellQuote: 0,
     liquidationNetQuote: 0,
@@ -127,6 +163,52 @@ function readNumber(value) {
 function readPositiveNumber(value) {
   const number = readNumber(value);
   return number !== null && number > 0 ? number : null;
+}
+
+function calculateBookImbalance(bestBidQty, bestAskQty) {
+  if (bestBidQty === null || bestAskQty === null) return null;
+  const depth = bestBidQty + bestAskQty;
+  return depth > 0 ? (bestBidQty - bestAskQty) / depth : null;
+}
+function calculateMicropriceLean(mid, microprice, spreadBps) {
+  if (mid === null || microprice === null || spreadBps === null || mid <= 0 || spreadBps === 0) return null;
+  return (2 * (((microprice - mid) / mid) * 10000)) / spreadBps;
+}
+
+function micropriceBucketSeconds(bucket, nowMs = bucket?.endMs) {
+  if (!bucket || !state.market) return 0;
+  const startMs = Math.max(bucket.startMs, state.market.startMs);
+  const endMs = Math.min(nowMs, bucket.endMs, state.market.endMs);
+  return Math.max(0, (endMs - startMs) / 1000);
+}
+
+function finalizeMicropricePressure(bucket) {
+  if (!bucket || bucket.micropricePressureFinalized) return;
+  bucket.micropricePressureFinalized = true;
+  const lean = readNumber(bucket.micropriceLean);
+  if (lean === null) return;
+
+  const seconds = micropriceBucketSeconds(bucket);
+  if (seconds <= 0) return;
+
+  const delta = lean * seconds;
+  bucket.micropricePressureDelta = delta;
+  state.micropricePressureMarket += delta;
+  state.micropricePressureContinuous += delta;
+}
+
+function liveMicropricePressure(nowMs) {
+  const lean = readNumber(state.currentBucket?.micropriceLean);
+  const seconds = micropriceBucketSeconds(state.currentBucket, nowMs);
+  const currentDelta = lean !== null && seconds > 0 ? lean * seconds : 0;
+
+  return {
+    micropriceLean: state.binance.micropriceLean,
+    micropricePressureDelta1s: lean !== null ? currentDelta : null,
+    micropricePressureMarket: state.micropricePressureMarket + currentDelta,
+    micropricePressureContinuous: state.micropricePressureContinuous + currentDelta,
+    micropriceSampleCount1s: state.currentBucket?.micropriceSampleCount || 0,
+  };
 }
 
 function toIso(ms) {
@@ -162,6 +244,10 @@ function ensureCurrentMarket(nowMs = Date.now()) {
     conditionId: null,
     upTokenId: null,
     downTokenId: null,
+    priceToBeat: null,
+    endPrice: null,
+    winningOutcome: "unknown",
+    priceToBeatSource: null,
     up: createPolymarketSide(),
     down: createPolymarketSide(),
     normalizedUp: null,
@@ -173,6 +259,8 @@ function ensureCurrentMarket(nowMs = Date.now()) {
   state.currentBucket = createFlowBucket(bucketStartMs(nowMs));
   state.flowHistory = [];
   state.marketFlow = createMarketFlowTotals();
+  state.position = createPositionState();
+  state.micropricePressureMarket = 0;
 
   return state.market;
 }
@@ -183,6 +271,7 @@ function rollBuckets(nowMs = Date.now()) {
   if (!state.currentBucket || state.currentBucket.startMs === startMs) return;
 
   if (state.currentBucket.startMs >= state.market.startMs && state.currentBucket.startMs < state.market.endMs) {
+    finalizeMicropricePressure(state.currentBucket);
     state.flowHistory.push({ ...state.currentBucket });
     if (state.flowHistory.length > MAX_HISTORY_POINTS) {
       state.flowHistory.splice(0, state.flowHistory.length - MAX_HISTORY_POINTS);
@@ -209,6 +298,22 @@ function rollingFlow(nowMs = Date.now()) {
     rollingGross30s: rollingGross,
     rollingImbalance30s: rollingGross > 0 ? rollingNet / rollingGross : null,
   };
+}
+
+function setPriceToBeat(price, source) {
+  const nextPrice = readPositiveNumber(price);
+  if (nextPrice === null) return false;
+  state.polymarket.priceToBeat = nextPrice;
+  state.polymarket.priceToBeatSource = source;
+  return true;
+}
+
+function maybeSetOpeningPriceToBeat(price, referenceMs) {
+  if (!state.market || state.polymarket.priceToBeat !== null) return;
+  if (!Number.isFinite(referenceMs)) return;
+  if (referenceMs < state.market.startMs - 1000) return;
+  if (referenceMs > state.market.startMs + PRICE_TO_BEAT_CHAINLINK_GRACE_MS) return;
+  setPriceToBeat(price, "chainlink_open_live");
 }
 
 function updatePolymarketPairQuality() {
@@ -247,6 +352,11 @@ export function observePolymarketMetadata(market, metadata) {
   state.polymarket.conditionId = metadata.conditionId || null;
   state.polymarket.upTokenId = metadata.upTokenId || null;
   state.polymarket.downTokenId = metadata.downTokenId || null;
+  const priceToBeat = readNumber(metadata.priceToBeat);
+  if (priceToBeat !== null) setPriceToBeat(priceToBeat, "gamma");
+  const endPrice = readNumber(metadata.endPrice);
+  if (endPrice !== null) state.polymarket.endPrice = endPrice;
+  state.polymarket.winningOutcome = metadata.winningOutcome || state.polymarket.winningOutcome || "unknown";
   state.polymarket.metadataUpdatedTs = Date.now();
 }
 
@@ -292,6 +402,7 @@ export function observeChainlinkTick(tick) {
     ageMs,
     quality: qualityFromAge(ageMs, POLYMARKET_RTDS_STALE_MS),
   };
+  maybeSetOpeningPriceToBeat(price, exchangeMs || receivedMs);
 }
 
 export function observeBinanceBookTicker(data) {
@@ -304,11 +415,14 @@ export function observeBinanceBookTicker(data) {
   if (bestBid === null || bestAsk === null || bestAsk < bestBid) return;
 
   const eventTs = readNumber(data?.E) || readNumber(data?.T) || nowMs;
+  rollBuckets(nowMs);
   const mid = (bestBid + bestAsk) / 2;
   const spreadBps = mid > 0 ? ((bestAsk - bestBid) / mid) * 10000 : null;
   const microprice = bestBidQty !== null && bestAskQty !== null && bestBidQty + bestAskQty > 0
     ? (bestAsk * bestBidQty + bestBid * bestAskQty) / (bestBidQty + bestAskQty)
     : null;
+  const micropriceLean = calculateMicropriceLean(mid, microprice, spreadBps);
+  const bookImbalance = calculateBookImbalance(bestBidQty, bestAskQty);
 
   state.binance.bestBid = bestBid;
   state.binance.bestBidQty = bestBidQty;
@@ -317,9 +431,16 @@ export function observeBinanceBookTicker(data) {
   state.binance.mid = mid;
   state.binance.spreadBps = spreadBps;
   state.binance.microprice = microprice;
+  state.binance.micropriceLean = micropriceLean;
+  state.binance.bookImbalance = bookImbalance;
   state.binance.bookEventTs = eventTs;
   state.binance.bookReceivedTs = nowMs;
   state.binance.eventLagMs = Math.max(0, nowMs - eventTs);
+
+  if (micropriceLean !== null) {
+    state.currentBucket.micropriceLean = micropriceLean;
+    state.currentBucket.micropriceSampleCount += 1;
+  }
 }
 
 export function observeBinanceAggTrade(data) {
@@ -376,6 +497,42 @@ export function observeBinanceForceOrder(data) {
   state.marketFlow.liquidationCount += 1;
 }
 
+export function observeFuturesPositionTick(sample) {
+  ensureCurrentMarket();
+  const nowMs = Date.now();
+  const openInterestBase = readNumber(sample?.openInterestBase);
+  const markPrice = readPositiveNumber(sample?.markPrice);
+  if (openInterestBase === null || openInterestBase < 0 || markPrice === null) return;
+
+  const openInterestQuote = readNumber(sample?.openInterestQuote) ?? openInterestBase * markPrice;
+  const indexPrice = readPositiveNumber(sample?.indexPrice);
+  const openInterestOpenBase = state.position.openInterestOpenBase ?? openInterestBase;
+  const openInterestOpenQuote = state.position.openInterestOpenQuote ?? openInterestQuote;
+  const openInterestChangeBase = openInterestBase - openInterestOpenBase;
+  const openInterestChangeQuote = openInterestQuote - openInterestOpenQuote;
+  const openInterestChangePct = openInterestOpenQuote > 0
+    ? (openInterestChangeQuote / openInterestOpenQuote) * 100
+    : null;
+
+  state.position = {
+    openInterestBase,
+    openInterestQuote,
+    openInterestOpenBase,
+    openInterestOpenQuote,
+    openInterestChangeBase,
+    openInterestChangeQuote,
+    openInterestChangePct,
+    markPrice,
+    indexPrice,
+    premiumBps: readNumber(sample?.premiumBps),
+    fundingRate: readNumber(sample?.fundingRate),
+    nextFundingTime: readNumber(sample?.nextFundingTime),
+    markExchangeTs: readNumber(sample?.markExchangeTs),
+    openInterestExchangeTs: readNumber(sample?.openInterestExchangeTs),
+    receivedTs: readNumber(sample?.receivedTs) || nowMs,
+    latencyMs: readNumber(sample?.latencyMs),
+  };
+}
 export function observeBinanceMarkPrice(data) {
   ensureCurrentMarket();
   const nowMs = Date.now();
@@ -400,12 +557,14 @@ function getStaleSources(nowMs) {
   const chainlinkAge = state.chainlink.receivedTs ? nowMs - state.chainlink.receivedTs : null;
   const upAge = state.polymarket.up.receivedTs ? nowMs - state.polymarket.up.receivedTs : null;
   const downAge = state.polymarket.down.receivedTs ? nowMs - state.polymarket.down.receivedTs : null;
+  const positionAge = state.position.receivedTs ? nowMs - state.position.receivedTs : null;
 
   if (bookAge === null || bookAge > BINANCE_STALE_MS) stale.push("binance_bookTicker");
   if (markAge === null || markAge > BINANCE_STALE_MS * 3) stale.push("binance_markPrice");
   if (chainlinkAge === null || chainlinkAge > POLYMARKET_RTDS_STALE_MS) stale.push("chainlink_rtds");
   if (upAge === null || upAge > POLYMARKET_STALE_MS) stale.push("polymarket_up");
   if (downAge === null || downAge > POLYMARKET_STALE_MS) stale.push("polymarket_down");
+  if (positionAge === null || positionAge > POSITION_STALE_MS) stale.push("binance_openInterest");
 
   return stale;
 }
@@ -416,11 +575,13 @@ export function getPublicLiveSnapshot() {
   const market = ensureCurrentMarket(nowMs);
   const elapsedMs = Math.min(Math.max(nowMs - market.startMs, 0), MARKET_MS);
   const rolling = rollingFlow(nowMs);
+  const micropricePressure = liveMicropricePressure(nowMs);
   const staleSources = getStaleSources(nowMs);
   state.collector.staleSources = staleSources;
 
   const bookAgeMs = state.binance.bookReceivedTs ? Math.max(0, nowMs - state.binance.bookReceivedTs) : null;
   const markAgeMs = state.binance.markReceivedTs ? Math.max(0, nowMs - state.binance.markReceivedTs) : null;
+  const positionAgeMs = state.position.receivedTs ? Math.max(0, nowMs - state.position.receivedTs) : null;
   const up = sideSnapshot(state.polymarket.up, nowMs);
   const down = sideSnapshot(state.polymarket.down, nowMs);
   const chainlinkAgeMs = state.chainlink.exchangeTs
@@ -445,6 +606,10 @@ export function getPublicLiveSnapshot() {
       conditionId: state.polymarket.conditionId,
       upTokenId: state.polymarket.upTokenId,
       downTokenId: state.polymarket.downTokenId,
+      priceToBeat: state.polymarket.priceToBeat,
+      endPrice: state.polymarket.endPrice,
+      winningOutcome: state.polymarket.winningOutcome,
+      priceToBeatSource: state.polymarket.priceToBeatSource,
       up,
       down,
       normalizedUp: state.polymarket.normalizedUp,
@@ -468,6 +633,12 @@ export function getPublicLiveSnapshot() {
       mid: state.binance.mid,
       spreadBps: state.binance.spreadBps,
       microprice: state.binance.microprice,
+      micropriceLean: micropricePressure.micropriceLean,
+      bookImbalance: state.binance.bookImbalance,
+      micropricePressureDelta1s: micropricePressure.micropricePressureDelta1s,
+      micropricePressureMarket: micropricePressure.micropricePressureMarket,
+      micropricePressureContinuous: micropricePressure.micropricePressureContinuous,
+      micropriceSampleCount1s: micropricePressure.micropriceSampleCount1s,
       markPrice: state.binance.markPrice,
       indexPrice: state.binance.indexPrice,
       fundingRate: state.binance.fundingRate,
@@ -476,6 +647,26 @@ export function getPublicLiveSnapshot() {
       bookAgeMs,
       markAgeMs,
       quality: qualityFromAge(bookAgeMs, BINANCE_STALE_MS),
+    },
+    position: {
+      openInterestBase: state.position.openInterestBase,
+      openInterestQuote: state.position.openInterestQuote,
+      openInterestOpenBase: state.position.openInterestOpenBase,
+      openInterestOpenQuote: state.position.openInterestOpenQuote,
+      openInterestChangeBase: state.position.openInterestChangeBase,
+      openInterestChangeQuote: state.position.openInterestChangeQuote,
+      openInterestChangePct: state.position.openInterestChangePct,
+      markPrice: state.position.markPrice,
+      indexPrice: state.position.indexPrice,
+      premiumBps: state.position.premiumBps,
+      fundingRate: state.position.fundingRate,
+      nextFundingTime: toIso(state.position.nextFundingTime),
+      markExchangeTs: toIso(state.position.markExchangeTs),
+      openInterestExchangeTs: toIso(state.position.openInterestExchangeTs),
+      receivedTs: toIso(state.position.receivedTs),
+      latencyMs: state.position.latencyMs,
+      ageMs: positionAgeMs,
+      quality: qualityFromAge(positionAgeMs, POSITION_STALE_MS),
     },
     flow: {
       takerBuyQuote1s: state.currentBucket.takerBuyQuote,

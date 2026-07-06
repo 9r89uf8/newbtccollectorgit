@@ -16,6 +16,8 @@ const ROLLING_FLOW_WINDOW_MS = 30_000;
 const BINANCE_STALE_MS = 5_000;
 const POLYMARKET_STALE_MS = 10_000;
 const POSITION_STALE_MS = Math.max(POSITION_SAMPLE_INTERVAL_MS * 3, 15_000);
+const POSITION_ROLLING_WINDOW_MS = 60_000;
+const MAX_POSITION_HISTORY_MS = 5 * 60_000;
 const MAX_HISTORY_POINTS = 900;
 const PRICE_TO_BEAT_CHAINLINK_GRACE_MS = 20_000;
 
@@ -50,6 +52,7 @@ const state = {
     quality: "missing",
   },
   position: createPositionState(),
+  positionHistory: [],
   polymarket: {
     slug: null,
     conditionId: null,
@@ -94,6 +97,10 @@ function createPositionState() {
     openInterestChangeBase: null,
     openInterestChangeQuote: null,
     openInterestChangePct: null,
+    openInterestChange1mBase: null,
+    openInterestChange1mQuote: null,
+    openInterestChange1mPct: null,
+    openInterestRollingWindowMs: null,
     markPrice: null,
     indexPrice: null,
     premiumBps: null,
@@ -497,9 +504,50 @@ export function observeBinanceForceOrder(data) {
   state.marketFlow.liquidationCount += 1;
 }
 
+function addPositionHistoryPoint(point) {
+  state.positionHistory.push(point);
+  const cutoff = point.receivedTs - MAX_POSITION_HISTORY_MS;
+  state.positionHistory = state.positionHistory.filter((row) => row.receivedTs >= cutoff && row.receivedTs <= point.receivedTs);
+}
+
+function calculateRollingOpenInterestChange(receivedTs, openInterestBase, openInterestQuote) {
+  const cutoff = receivedTs - POSITION_ROLLING_WINDOW_MS;
+  let reference = null;
+  for (const row of state.positionHistory) {
+    if (row.receivedTs <= cutoff) {
+      reference = row;
+    } else {
+      break;
+    }
+  }
+  if (!reference) reference = state.positionHistory[0] || null;
+  if (!reference) {
+    return {
+      openInterestChange1mBase: null,
+      openInterestChange1mQuote: null,
+      openInterestChange1mPct: null,
+      openInterestRollingWindowMs: null,
+    };
+  }
+
+  const openInterestChange1mBase = openInterestBase - reference.openInterestBase;
+  const openInterestChange1mQuote = openInterestQuote - reference.openInterestQuote;
+  const openInterestChange1mPct = reference.openInterestQuote > 0
+    ? (openInterestChange1mQuote / reference.openInterestQuote) * 100
+    : null;
+
+  return {
+    openInterestChange1mBase,
+    openInterestChange1mQuote,
+    openInterestChange1mPct,
+    openInterestRollingWindowMs: Math.max(0, receivedTs - reference.receivedTs),
+  };
+}
+
 export function observeFuturesPositionTick(sample) {
   ensureCurrentMarket();
   const nowMs = Date.now();
+  const receivedTs = readNumber(sample?.receivedTs) || nowMs;
   const openInterestBase = readNumber(sample?.openInterestBase);
   const markPrice = readPositiveNumber(sample?.markPrice);
   if (openInterestBase === null || openInterestBase < 0 || markPrice === null) return;
@@ -514,6 +562,9 @@ export function observeFuturesPositionTick(sample) {
     ? (openInterestChangeQuote / openInterestOpenQuote) * 100
     : null;
 
+  addPositionHistoryPoint({ receivedTs, openInterestBase, openInterestQuote });
+  const rolling = calculateRollingOpenInterestChange(receivedTs, openInterestBase, openInterestQuote);
+
   state.position = {
     openInterestBase,
     openInterestQuote,
@@ -522,6 +573,10 @@ export function observeFuturesPositionTick(sample) {
     openInterestChangeBase,
     openInterestChangeQuote,
     openInterestChangePct,
+    openInterestChange1mBase: rolling.openInterestChange1mBase,
+    openInterestChange1mQuote: rolling.openInterestChange1mQuote,
+    openInterestChange1mPct: rolling.openInterestChange1mPct,
+    openInterestRollingWindowMs: rolling.openInterestRollingWindowMs,
     markPrice,
     indexPrice,
     premiumBps: readNumber(sample?.premiumBps),
@@ -529,7 +584,7 @@ export function observeFuturesPositionTick(sample) {
     nextFundingTime: readNumber(sample?.nextFundingTime),
     markExchangeTs: readNumber(sample?.markExchangeTs),
     openInterestExchangeTs: readNumber(sample?.openInterestExchangeTs),
-    receivedTs: readNumber(sample?.receivedTs) || nowMs,
+    receivedTs,
     latencyMs: readNumber(sample?.latencyMs),
   };
 }
@@ -656,6 +711,10 @@ export function getPublicLiveSnapshot() {
       openInterestChangeBase: state.position.openInterestChangeBase,
       openInterestChangeQuote: state.position.openInterestChangeQuote,
       openInterestChangePct: state.position.openInterestChangePct,
+      openInterestChange1mBase: state.position.openInterestChange1mBase,
+      openInterestChange1mQuote: state.position.openInterestChange1mQuote,
+      openInterestChange1mPct: state.position.openInterestChange1mPct,
+      openInterestRollingWindowMs: state.position.openInterestRollingWindowMs,
       markPrice: state.position.markPrice,
       indexPrice: state.position.indexPrice,
       premiumBps: state.position.premiumBps,

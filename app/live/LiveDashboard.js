@@ -210,6 +210,8 @@ function snapshotPoint(snapshot) {
     openInterestQuote: readNumber(snapshot.position?.openInterestQuote),
     openInterestChangeQuote: readNumber(snapshot.position?.openInterestChangeQuote),
     openInterestChangePct: readNumber(snapshot.position?.openInterestChangePct),
+    openInterestChange1mQuote: readNumber(snapshot.position?.openInterestChange1mQuote),
+    openInterestChange1mPct: readNumber(snapshot.position?.openInterestChange1mPct),
   };
 }
 
@@ -656,7 +658,7 @@ export default function LiveDashboard() {
         <div className="panel-heading">
           <div>
             <p className="panel-label">Live positioning</p>
-            <h2>Open interest change from market open</h2>
+            <h2>Rolling 1m and market open interest change</h2>
           </div>
           <div className="live-probability-pills">
             <span className={`status-pill ${statusClass(position.quality)}`}>{position.quality || "waiting"}</span>
@@ -667,7 +669,8 @@ export default function LiveDashboard() {
           leftTickCount={5}
           leftFormatter={formatSignedCompactUsd}
           series={[
-            { key: "openInterestChangeQuote", label: "OI change", color: "#7a5af8", strokeWidth: "2.6" },
+            { key: "openInterestChange1mQuote", label: "OI 1m", color: "#7a5af8", strokeWidth: "2.8" },
+            { key: "openInterestChangeQuote", label: "OI market", color: "#475467", strokeWidth: "2.1", strokeDasharray: "6 5", opacity: 0.9 },
           ]}
         />
       </section>
@@ -717,8 +720,10 @@ export default function LiveDashboard() {
           <FieldGrid rows={[
             { label: "OI notional", value: formatCompactUsd(position.openInterestQuote) },
             { label: "OI BTC", value: formatNumber(position.openInterestBase, 3) },
-            { label: "OI change", value: formatSignedCompactUsd(position.openInterestChangeQuote), className: signedClass(position.openInterestChangeQuote) },
-            { label: "OI change %", value: formatPercentValue(position.openInterestChangePct), className: signedClass(position.openInterestChangePct) },
+            { label: "OI 1m", value: formatSignedCompactUsd(position.openInterestChange1mQuote), className: signedClass(position.openInterestChange1mQuote) },
+            { label: "OI 1m %", value: formatPercentValue(position.openInterestChange1mPct), className: signedClass(position.openInterestChange1mPct) },
+            { label: "OI market", value: formatSignedCompactUsd(position.openInterestChangeQuote), className: signedClass(position.openInterestChangeQuote) },
+            { label: "OI market %", value: formatPercentValue(position.openInterestChangePct), className: signedClass(position.openInterestChangePct) },
             { label: "Open OI", value: formatCompactUsd(position.openInterestOpenQuote) },
             { label: "Mark", value: formatPrice(position.markPrice) },
             { label: "Premium", value: formatBps(position.premiumBps), className: signedClass(position.premiumBps) },

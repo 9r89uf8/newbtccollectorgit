@@ -7,6 +7,7 @@ import {
   POLYMARKET_RTDS_STALE_MS,
 } from "./config.mjs";
 import { recordError } from "./store.mjs";
+import { observeChainlinkTick } from "./liveState.mjs";
 
 const OPEN_STATE = 1;
 const CLOSING_STATE = 2;
@@ -89,6 +90,7 @@ function handleMessage(message) {
   const tick = parseRtdsMessage(message);
   if (!tick) return;
   state.latestTick = tick;
+  observeChainlinkTick(tick);
 }
 
 function scheduleReconnect() {

@@ -1,0 +1,569 @@
+import { performance } from "node:perf_hooks";
+import { query } from "../lib/db.js";
+import {
+  FUTURES_WS_SUMMARY_BUCKET_MS,
+  LIVE_STATE_PERSIST_INTERVAL_MS,
+  MARKET_MS,
+  POLYMARKET_RTDS_STALE_MS,
+  SYMBOL,
+} from "./config.mjs";
+import { getMarketWindow } from "./time.mjs";
+import { slugForMarket } from "./polymarketSamples.mjs";
+
+const SECOND_MS = FUTURES_WS_SUMMARY_BUCKET_MS || 1000;
+const ROLLING_FLOW_WINDOW_MS = 30_000;
+const BINANCE_STALE_MS = 5_000;
+const POLYMARKET_STALE_MS = 10_000;
+const MAX_HISTORY_POINTS = 900;
+
+const state = {
+  market: null,
+  binance: {
+    bestBid: null,
+    bestBidQty: null,
+    bestAsk: null,
+    bestAskQty: null,
+    mid: null,
+    spreadBps: null,
+    microprice: null,
+    bookEventTs: null,
+    bookReceivedTs: null,
+    eventLagMs: null,
+    markPrice: null,
+    indexPrice: null,
+    fundingRate: null,
+    nextFundingTime: null,
+    markEventTs: null,
+    markReceivedTs: null,
+  },
+  chainlink: {
+    price: null,
+    exchangeTs: null,
+    serverTs: null,
+    receivedTs: null,
+    ageMs: null,
+    quality: "missing",
+  },
+  polymarket: {
+    slug: null,
+    conditionId: null,
+    upTokenId: null,
+    downTokenId: null,
+    up: createPolymarketSide(),
+    down: createPolymarketSide(),
+    normalizedUp: null,
+    normalizedDown: null,
+    probabilitySum: null,
+    quality: "missing",
+    metadataUpdatedTs: null,
+  },
+  currentBucket: createFlowBucket(bucketStartMs(Date.now())),
+  flowHistory: [],
+  marketFlow: createMarketFlowTotals(),
+  continuousCvdQuote: 0,
+  collector: {
+    startedAt: Date.now(),
+    lastPersistedAt: null,
+    persistError: null,
+    eventLoopLagMs: null,
+    reconnectCount: 0,
+    staleSources: [],
+  },
+  flusher: null,
+  lagTimer: null,
+};
+
+function createPolymarketSide() {
+  return {
+    bid: null,
+    ask: null,
+    mid: null,
+    lastTradePrice: null,
+    eventTs: null,
+    receivedTs: null,
+  };
+}
+
+function createMarketFlowTotals() {
+  return {
+    takerBuyQuote: 0,
+    takerSellQuote: 0,
+    netTakerQuote: 0,
+    grossTakerQuote: 0,
+    tradeCount: 0,
+    liquidationBuyQuote: 0,
+    liquidationSellQuote: 0,
+    liquidationNetQuote: 0,
+    liquidationCount: 0,
+  };
+}
+
+function createFlowBucket(startMs) {
+  return {
+    startMs,
+    endMs: startMs + SECOND_MS,
+    takerBuyQuote: 0,
+    takerSellQuote: 0,
+    netTakerQuote: 0,
+    grossTakerQuote: 0,
+    tradeCount: 0,
+    liquidationBuyQuote: 0,
+    liquidationSellQuote: 0,
+    liquidationNetQuote: 0,
+    liquidationCount: 0,
+  };
+}
+
+function bucketStartMs(ms) {
+  return Math.floor(ms / SECOND_MS) * SECOND_MS;
+}
+
+function readNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function readPositiveNumber(value) {
+  const number = readNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+function toIso(ms) {
+  return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null;
+}
+
+function qualityFromAge(ageMs, staleMs) {
+  if (ageMs === null) return "missing";
+  return ageMs <= staleMs ? "complete" : "stale";
+}
+
+function sideSnapshot(side, nowMs) {
+  const ageMs = side.receivedTs ? Math.max(0, nowMs - side.receivedTs) : null;
+  return {
+    bid: side.bid,
+    ask: side.ask,
+    mid: side.mid,
+    lastTradePrice: side.lastTradePrice,
+    ts: toIso(side.eventTs),
+    receivedTs: toIso(side.receivedTs),
+    ageMs,
+    quality: qualityFromAge(ageMs, POLYMARKET_STALE_MS),
+  };
+}
+
+function ensureCurrentMarket(nowMs = Date.now()) {
+  const market = getMarketWindow(new Date(nowMs), SYMBOL);
+  if (state.market?.id === market.id) return state.market;
+
+  state.market = market;
+  state.polymarket = {
+    slug: slugForMarket(market),
+    conditionId: null,
+    upTokenId: null,
+    downTokenId: null,
+    up: createPolymarketSide(),
+    down: createPolymarketSide(),
+    normalizedUp: null,
+    normalizedDown: null,
+    probabilitySum: null,
+    quality: "missing",
+    metadataUpdatedTs: null,
+  };
+  state.currentBucket = createFlowBucket(bucketStartMs(nowMs));
+  state.flowHistory = [];
+  state.marketFlow = createMarketFlowTotals();
+
+  return state.market;
+}
+
+function rollBuckets(nowMs = Date.now()) {
+  ensureCurrentMarket(nowMs);
+  const startMs = bucketStartMs(nowMs);
+  if (!state.currentBucket || state.currentBucket.startMs === startMs) return;
+
+  if (state.currentBucket.startMs >= state.market.startMs && state.currentBucket.startMs < state.market.endMs) {
+    state.flowHistory.push({ ...state.currentBucket });
+    if (state.flowHistory.length > MAX_HISTORY_POINTS) {
+      state.flowHistory.splice(0, state.flowHistory.length - MAX_HISTORY_POINTS);
+    }
+  }
+
+  state.currentBucket = createFlowBucket(startMs);
+}
+
+function rollingFlow(nowMs = Date.now()) {
+  const cutoffMs = nowMs - ROLLING_FLOW_WINDOW_MS;
+  const rows = state.flowHistory.filter((bucket) => bucket.startMs >= cutoffMs);
+  if (state.currentBucket.startMs >= cutoffMs) rows.push(state.currentBucket);
+
+  let rollingNet = 0;
+  let rollingGross = 0;
+  for (const row of rows) {
+    rollingNet += row.netTakerQuote;
+    rollingGross += row.grossTakerQuote;
+  }
+
+  return {
+    rollingNet30s: rollingNet,
+    rollingGross30s: rollingGross,
+    rollingImbalance30s: rollingGross > 0 ? rollingNet / rollingGross : null,
+  };
+}
+
+function updatePolymarketPairQuality() {
+  const upMid = state.polymarket.up.mid;
+  const downMid = state.polymarket.down.mid;
+
+  if (upMid !== null && downMid !== null) {
+    const sum = upMid + downMid;
+    state.polymarket.probabilitySum = sum;
+    state.polymarket.normalizedUp = sum > 0 ? upMid / sum : null;
+    state.polymarket.normalizedDown = sum > 0 ? downMid / sum : null;
+    state.polymarket.quality = sum > 0 ? "complete" : "partial";
+    return;
+  }
+
+  state.polymarket.probabilitySum = null;
+  state.polymarket.normalizedUp = null;
+  state.polymarket.normalizedDown = null;
+  state.polymarket.quality = upMid !== null || downMid !== null ? "partial" : "missing";
+}
+
+export function noteLiveReconnect(source) {
+  state.collector.reconnectCount += 1;
+  if (source) {
+    state.collector.lastReconnectSource = source;
+    state.collector.lastReconnectAt = Date.now();
+  }
+}
+
+export function observePolymarketMetadata(market, metadata) {
+  if (!market || !metadata) return;
+  ensureCurrentMarket();
+  if (state.market?.id !== market.id) return;
+
+  state.polymarket.slug = metadata.slug || slugForMarket(market);
+  state.polymarket.conditionId = metadata.conditionId || null;
+  state.polymarket.upTokenId = metadata.upTokenId || null;
+  state.polymarket.downTokenId = metadata.downTokenId || null;
+  state.polymarket.metadataUpdatedTs = Date.now();
+}
+
+export function observePolymarketQuote({ marketId, side, bid, ask, lastTradePrice, eventTs }) {
+  ensureCurrentMarket();
+  if (marketId && state.market?.id !== marketId) return;
+  if (!["up", "down"].includes(side)) return;
+
+  const target = state.polymarket[side];
+  const nextBid = readNumber(bid);
+  const nextAsk = readNumber(ask);
+  const nextTrade = readNumber(lastTradePrice);
+  const receivedTs = Date.now();
+
+  if (nextBid !== null) target.bid = nextBid;
+  if (nextAsk !== null) target.ask = nextAsk;
+  if (nextTrade !== null) target.lastTradePrice = nextTrade;
+  if (target.bid !== null && target.ask !== null) {
+    target.mid = (target.bid + target.ask) / 2;
+  }
+  target.eventTs = readNumber(eventTs) || receivedTs;
+  target.receivedTs = receivedTs;
+
+  updatePolymarketPairQuality();
+}
+
+export function observeChainlinkTick(tick) {
+  ensureCurrentMarket();
+  const nowMs = Date.now();
+  const price = readPositiveNumber(tick?.price);
+  if (price === null) return;
+
+  const exchangeMs = readNumber(tick.priceTimestampMs) || readNumber(tick.exchangeTs) || null;
+  const serverMs = readNumber(tick.serverTimestampMs) || null;
+  const receivedMs = readNumber(tick.receivedAtMs) || nowMs;
+  const ageMs = exchangeMs ? Math.max(0, nowMs - exchangeMs) : Math.max(0, nowMs - receivedMs);
+
+  state.chainlink = {
+    price,
+    exchangeTs: exchangeMs,
+    serverTs: serverMs,
+    receivedTs: receivedMs,
+    ageMs,
+    quality: qualityFromAge(ageMs, POLYMARKET_RTDS_STALE_MS),
+  };
+}
+
+export function observeBinanceBookTicker(data) {
+  ensureCurrentMarket();
+  const nowMs = Date.now();
+  const bestBid = readPositiveNumber(data?.b);
+  const bestBidQty = readNumber(data?.B);
+  const bestAsk = readPositiveNumber(data?.a);
+  const bestAskQty = readNumber(data?.A);
+  if (bestBid === null || bestAsk === null || bestAsk < bestBid) return;
+
+  const eventTs = readNumber(data?.E) || readNumber(data?.T) || nowMs;
+  const mid = (bestBid + bestAsk) / 2;
+  const spreadBps = mid > 0 ? ((bestAsk - bestBid) / mid) * 10000 : null;
+  const microprice = bestBidQty !== null && bestAskQty !== null && bestBidQty + bestAskQty > 0
+    ? (bestAsk * bestBidQty + bestBid * bestAskQty) / (bestBidQty + bestAskQty)
+    : null;
+
+  state.binance.bestBid = bestBid;
+  state.binance.bestBidQty = bestBidQty;
+  state.binance.bestAsk = bestAsk;
+  state.binance.bestAskQty = bestAskQty;
+  state.binance.mid = mid;
+  state.binance.spreadBps = spreadBps;
+  state.binance.microprice = microprice;
+  state.binance.bookEventTs = eventTs;
+  state.binance.bookReceivedTs = nowMs;
+  state.binance.eventLagMs = Math.max(0, nowMs - eventTs);
+}
+
+export function observeBinanceAggTrade(data) {
+  const price = readPositiveNumber(data?.p);
+  const quantity = readPositiveNumber(data?.q);
+  if (price === null || quantity === null) return;
+
+  const eventTs = readNumber(data?.T) || readNumber(data?.E) || Date.now();
+  rollBuckets(eventTs);
+  const quote = price * quantity;
+  const buyerIsMaker = data?.m === true;
+  const isTakerBuy = !buyerIsMaker;
+
+  if (isTakerBuy) {
+    state.currentBucket.takerBuyQuote += quote;
+    state.marketFlow.takerBuyQuote += quote;
+  } else {
+    state.currentBucket.takerSellQuote += quote;
+    state.marketFlow.takerSellQuote += quote;
+  }
+
+  state.currentBucket.netTakerQuote = state.currentBucket.takerBuyQuote - state.currentBucket.takerSellQuote;
+  state.currentBucket.grossTakerQuote = state.currentBucket.takerBuyQuote + state.currentBucket.takerSellQuote;
+  state.currentBucket.tradeCount += 1;
+
+  state.marketFlow.netTakerQuote = state.marketFlow.takerBuyQuote - state.marketFlow.takerSellQuote;
+  state.marketFlow.grossTakerQuote = state.marketFlow.takerBuyQuote + state.marketFlow.takerSellQuote;
+  state.marketFlow.tradeCount += 1;
+  state.continuousCvdQuote += isTakerBuy ? quote : -quote;
+}
+
+export function observeBinanceForceOrder(data) {
+  const order = data?.o || {};
+  const price = readPositiveNumber(order.ap || order.p);
+  const quantity = readPositiveNumber(order.z || order.q);
+  const side = String(order.S || "").toUpperCase();
+  if (price === null || quantity === null || !["BUY", "SELL"].includes(side)) return;
+
+  const eventTs = readNumber(order.T) || readNumber(data?.E) || Date.now();
+  rollBuckets(eventTs);
+  const quote = price * quantity;
+
+  if (side === "BUY") {
+    state.currentBucket.liquidationBuyQuote += quote;
+    state.marketFlow.liquidationBuyQuote += quote;
+  } else {
+    state.currentBucket.liquidationSellQuote += quote;
+    state.marketFlow.liquidationSellQuote += quote;
+  }
+
+  state.currentBucket.liquidationNetQuote = state.currentBucket.liquidationBuyQuote - state.currentBucket.liquidationSellQuote;
+  state.currentBucket.liquidationCount += 1;
+  state.marketFlow.liquidationNetQuote = state.marketFlow.liquidationBuyQuote - state.marketFlow.liquidationSellQuote;
+  state.marketFlow.liquidationCount += 1;
+}
+
+export function observeBinanceMarkPrice(data) {
+  ensureCurrentMarket();
+  const nowMs = Date.now();
+  const markPrice = readPositiveNumber(data?.p);
+  const indexPrice = readPositiveNumber(data?.i);
+  const fundingRate = readNumber(data?.r);
+  const eventTs = readNumber(data?.E) || nowMs;
+  if (markPrice === null && indexPrice === null && fundingRate === null) return;
+
+  state.binance.markPrice = markPrice;
+  state.binance.indexPrice = indexPrice;
+  state.binance.fundingRate = fundingRate;
+  state.binance.nextFundingTime = readNumber(data?.T);
+  state.binance.markEventTs = eventTs;
+  state.binance.markReceivedTs = nowMs;
+}
+
+function getStaleSources(nowMs) {
+  const stale = [];
+  const bookAge = state.binance.bookReceivedTs ? nowMs - state.binance.bookReceivedTs : null;
+  const markAge = state.binance.markReceivedTs ? nowMs - state.binance.markReceivedTs : null;
+  const chainlinkAge = state.chainlink.receivedTs ? nowMs - state.chainlink.receivedTs : null;
+  const upAge = state.polymarket.up.receivedTs ? nowMs - state.polymarket.up.receivedTs : null;
+  const downAge = state.polymarket.down.receivedTs ? nowMs - state.polymarket.down.receivedTs : null;
+
+  if (bookAge === null || bookAge > BINANCE_STALE_MS) stale.push("binance_bookTicker");
+  if (markAge === null || markAge > BINANCE_STALE_MS * 3) stale.push("binance_markPrice");
+  if (chainlinkAge === null || chainlinkAge > POLYMARKET_RTDS_STALE_MS) stale.push("chainlink_rtds");
+  if (upAge === null || upAge > POLYMARKET_STALE_MS) stale.push("polymarket_up");
+  if (downAge === null || downAge > POLYMARKET_STALE_MS) stale.push("polymarket_down");
+
+  return stale;
+}
+
+export function getPublicLiveSnapshot() {
+  const nowMs = Date.now();
+  rollBuckets(nowMs);
+  const market = ensureCurrentMarket(nowMs);
+  const elapsedMs = Math.min(Math.max(nowMs - market.startMs, 0), MARKET_MS);
+  const rolling = rollingFlow(nowMs);
+  const staleSources = getStaleSources(nowMs);
+  state.collector.staleSources = staleSources;
+
+  const bookAgeMs = state.binance.bookReceivedTs ? Math.max(0, nowMs - state.binance.bookReceivedTs) : null;
+  const markAgeMs = state.binance.markReceivedTs ? Math.max(0, nowMs - state.binance.markReceivedTs) : null;
+  const up = sideSnapshot(state.polymarket.up, nowMs);
+  const down = sideSnapshot(state.polymarket.down, nowMs);
+  const chainlinkAgeMs = state.chainlink.exchangeTs
+    ? Math.max(0, nowMs - state.chainlink.exchangeTs)
+    : state.chainlink.receivedTs
+      ? Math.max(0, nowMs - state.chainlink.receivedTs)
+      : null;
+
+  return {
+    market: {
+      id: market.id,
+      symbol: market.symbol,
+      slug: state.polymarket.slug || slugForMarket(market),
+      startTime: market.start.toISOString(),
+      endTime: market.end.toISOString(),
+      secondsElapsed: Math.floor(elapsedMs / 1000),
+      secondsRemaining: Math.max(0, Math.ceil((market.endMs - nowMs) / 1000)),
+      status: nowMs < market.endMs ? "open" : "closing",
+    },
+    polymarket: {
+      slug: state.polymarket.slug,
+      conditionId: state.polymarket.conditionId,
+      upTokenId: state.polymarket.upTokenId,
+      downTokenId: state.polymarket.downTokenId,
+      up,
+      down,
+      normalizedUp: state.polymarket.normalizedUp,
+      normalizedDown: state.polymarket.normalizedDown,
+      probabilitySum: state.polymarket.probabilitySum,
+      quality: state.polymarket.quality,
+    },
+    chainlink: {
+      price: state.chainlink.price,
+      exchangeTs: toIso(state.chainlink.exchangeTs),
+      serverTs: toIso(state.chainlink.serverTs),
+      receivedTs: toIso(state.chainlink.receivedTs),
+      ageMs: chainlinkAgeMs,
+      quality: qualityFromAge(chainlinkAgeMs, POLYMARKET_RTDS_STALE_MS),
+    },
+    binance: {
+      bestBid: state.binance.bestBid,
+      bestBidQty: state.binance.bestBidQty,
+      bestAsk: state.binance.bestAsk,
+      bestAskQty: state.binance.bestAskQty,
+      mid: state.binance.mid,
+      spreadBps: state.binance.spreadBps,
+      microprice: state.binance.microprice,
+      markPrice: state.binance.markPrice,
+      indexPrice: state.binance.indexPrice,
+      fundingRate: state.binance.fundingRate,
+      nextFundingTime: toIso(state.binance.nextFundingTime),
+      eventLagMs: state.binance.eventLagMs,
+      bookAgeMs,
+      markAgeMs,
+      quality: qualityFromAge(bookAgeMs, BINANCE_STALE_MS),
+    },
+    flow: {
+      takerBuyQuote1s: state.currentBucket.takerBuyQuote,
+      takerSellQuote1s: state.currentBucket.takerSellQuote,
+      netTakerQuote1s: state.currentBucket.netTakerQuote,
+      grossTakerQuote1s: state.currentBucket.grossTakerQuote,
+      tradeCount1s: state.currentBucket.tradeCount,
+      cvdMarketQuote: state.marketFlow.netTakerQuote,
+      cvdContinuousQuote: state.continuousCvdQuote,
+      rollingNet30s: rolling.rollingNet30s,
+      rollingGross30s: rolling.rollingGross30s,
+      rollingImbalance30s: rolling.rollingImbalance30s,
+      marketTakerBuyQuote: state.marketFlow.takerBuyQuote,
+      marketTakerSellQuote: state.marketFlow.takerSellQuote,
+      marketGrossTakerQuote: state.marketFlow.grossTakerQuote,
+      marketTradeCount: state.marketFlow.tradeCount,
+    },
+    liquidations: {
+      buyQuote1s: state.currentBucket.liquidationBuyQuote,
+      sellQuote1s: state.currentBucket.liquidationSellQuote,
+      netQuote1s: state.currentBucket.liquidationNetQuote,
+      count1s: state.currentBucket.liquidationCount,
+      marketBuyQuote: state.marketFlow.liquidationBuyQuote,
+      marketSellQuote: state.marketFlow.liquidationSellQuote,
+      marketNetQuote: state.marketFlow.liquidationNetQuote,
+      marketCount: state.marketFlow.liquidationCount,
+    },
+    collector: {
+      snapshotTs: new Date(nowMs).toISOString(),
+      uptimeSeconds: Math.floor((nowMs - state.collector.startedAt) / 1000),
+      eventLoopLagMs: state.collector.eventLoopLagMs,
+      reconnectCount: state.collector.reconnectCount,
+      staleSources,
+      lastPersistedAt: toIso(state.collector.lastPersistedAt),
+      persistError: state.collector.persistError,
+    },
+  };
+}
+
+async function persistLiveSnapshot() {
+  const snapshot = getPublicLiveSnapshot();
+  await query(
+    `
+      insert into live_state (key, updated_at, market_id, payload)
+      values ($1, now(), $2, $3::jsonb)
+      on conflict (key) do update set
+        updated_at = excluded.updated_at,
+        market_id = excluded.market_id,
+        payload = excluded.payload
+    `,
+    ["latest", snapshot.market.id, JSON.stringify(snapshot)]
+  );
+  state.collector.lastPersistedAt = Date.now();
+  state.collector.persistError = null;
+}
+
+export function startLiveStateFlusher() {
+  if (state.flusher) return { stop: stopLiveStateFlusher };
+
+  let lagStartedAt = performance.now();
+  state.lagTimer = setInterval(() => {
+    const now = performance.now();
+    state.collector.eventLoopLagMs = Math.max(0, Math.round(now - lagStartedAt - 1000));
+    lagStartedAt = now;
+  }, 1000);
+  state.lagTimer.unref?.();
+
+  state.flusher = setInterval(() => {
+    persistLiveSnapshot().catch((error) => {
+      state.collector.persistError = error.message || String(error);
+    });
+  }, LIVE_STATE_PERSIST_INTERVAL_MS);
+  state.flusher.unref?.();
+
+  persistLiveSnapshot().catch((error) => {
+    state.collector.persistError = error.message || String(error);
+  });
+
+  return { stop: stopLiveStateFlusher };
+}
+
+export function stopLiveStateFlusher() {
+  if (state.flusher) {
+    clearInterval(state.flusher);
+    state.flusher = null;
+  }
+  if (state.lagTimer) {
+    clearInterval(state.lagTimer);
+    state.lagTimer = null;
+  }
+}

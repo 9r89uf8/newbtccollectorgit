@@ -12,6 +12,13 @@ import {
 } from "./config.mjs";
 import { getMarketWindow, toIsoSeconds } from "./time.mjs";
 import { heartbeat, markMarketIncomplete, recordError, upsertMarket } from "./store.mjs";
+import {
+  noteLiveReconnect,
+  observeBinanceAggTrade,
+  observeBinanceBookTicker,
+  observeBinanceForceOrder,
+  observeBinanceMarkPrice,
+} from "./liveState.mjs";
 
 const OPEN_STATE = 1;
 const CLOSING_STATE = 2;
@@ -184,6 +191,7 @@ function handleBookTicker(state, data) {
 
   if (bidPrice === null || bidQty === null || askPrice === null || askQty === null) return;
   if (askPrice < bidPrice) return;
+  observeBinanceBookTicker(data);
 
   const eventMs = Number(data.E || data.T || Date.now());
   const bucket = getBucket(state, eventMs);
@@ -227,6 +235,7 @@ function handleLiquidation(state, data) {
   const price = readPositiveNumber(order.ap || order.p);
 
   if (!quantity || !price || !["BUY", "SELL"].includes(side)) return;
+  observeBinanceForceOrder(data);
 
   const quoteNotional = quantity * price;
   const bucket = getBucket(state, eventMs);
@@ -264,6 +273,10 @@ function handleMessage(state, message) {
     handleBookTicker(state, data);
   } else if (eventType === "forceOrder" || stream.endsWith("@forceOrder")) {
     handleLiquidation(state, data);
+  } else if (eventType === "aggTrade" || stream.endsWith("@aggTrade")) {
+    observeBinanceAggTrade(data);
+  } else if (eventType === "markPriceUpdate" || stream.includes("@markPrice")) {
+    observeBinanceMarkPrice(data);
   }
 }
 
@@ -482,6 +495,7 @@ function connect(state, connection) {
         "websocket_closed",
         `Binance futures ${connection.name} WebSocket closed with code ${event.code || 0}`
       );
+      noteLiveReconnect(`${FUTURES_WEBSOCKET_SOURCE.source}:${connection.name}`);
       scheduleReconnect(state, connection);
     }
   });
@@ -532,3 +546,7 @@ export function startFuturesWebSocketSummaryCollector() {
     },
   };
 }
+
+
+
+

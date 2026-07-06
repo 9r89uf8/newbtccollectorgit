@@ -20,7 +20,7 @@ It records these data families.
 | Top-100 book depth | `binance_futures` | `futures` | `/fapi/v1/depth?limit=100` | Derived top-of-book and depth metrics at each scheduled sample time. |
 | Futures positioning | `binance_futures` | `futures` | `/fapi/v1/premiumIndex`, `/fapi/v1/openInterest` | Mark/index price, mark/index basis, funding, and current open interest on a 5 second cadence. |
 | Futures basis | `binance_futures` | `futures` | `/futures/data/basis` | Binance 5 minute basis, basis rate, futures price, and index price for `PERPETUAL` by default. |
-| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata, Gamma settlement Chainlink BTC prices, and paired Up/Down midpoint probabilities. |
+| Prediction market probabilities | `polymarket_clob_midpoints` | `prediction_market` | Gamma `/markets/slug/{slug}`, CLOB `/midpoints` | 5 minute BTC Up/Down market metadata, Gamma settlement Chainlink BTC prices, and paired Up/Down CLOB midpoint probabilities. |
 | Chainlink BTC reference | `polymarket_rtds_chainlink` | `oracle` | RTDS `crypto_prices_chainlink` WebSocket topic | Polymarket-provided BTC/USD Chainlink reference ticks sampled on the market cadence. |
 | Top-of-book updates | `binance_futures_ws` | `futures` | WebSocket `@bookTicker` | One-second top-of-book summaries. Raw messages are not stored. |
 | Liquidation events | `binance_futures_ws` | `futures` | WebSocket `@forceOrder` | One-second liquidation notional summaries. Raw events are not stored. |
@@ -162,6 +162,19 @@ btc-updown-5m-<utc_start_epoch_seconds>
 
 The slug epoch defines the 5 minute UTC window. Gamma `startDate` and `startDateIso` are treated as Polymarket creation/series metadata, not as the collector market start time.
 
+Polymarket exposes the Up and Down sides as separate CLOB outcome tokens, not as one market-level probability. The collector first fetches Gamma metadata for the slug and maps Gamma `outcomes` or `shortOutcomes` to `clobTokenIds`. Those side-specific token ids are stored in `polymarket_5m_btc_markets.up_token_id` and `polymarket_5m_btc_markets.down_token_id`.
+
+Probability collection uses those two token ids in one batched CLOB `/midpoints` request:
+
+```json
+[
+  { "token_id": "<up_token_id>" },
+  { "token_id": "<down_token_id>" }
+]
+```
+
+The response is keyed by token id, so the collector reads the Up token midpoint into `up_probability` and the Down token midpoint into `down_probability`. Up and Down therefore differ by token id and stored columns, but not by schedule, market window, endpoint, or request cadence.
+
 Probability samples use the same in-window cadence as the existing collector and do not include a close-boundary sample for the market that is ending. When the next market is inside the metadata prefetch lead window, the collector also stores upcoming-market CLOB midpoint rows before start with `sample_type = preopen`. At the close/open boundary, the collector tries to write the next market opening probability row and retries that opening timestamp for up to 20 seconds if Polymarket is not ready yet:
 
 | Window offset | Frequency | Sample type |
@@ -178,7 +191,17 @@ Expected Polymarket probability samples per complete market:
 76 total probability samples
 ```
 
-Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Rows also store `data_delay_ms` and `availability_status` so delayed opening observations are not confused with true on-time `0s` data. Opening retry rows can use `scheduled_at = market.start_time` with `availability_status = delayed_open` when the first usable CLOB midpoint pair arrived after the market had already started. Failed attempts are stored as `quality = missing` with nullable token ids when Gamma metadata or midpoint data is unavailable.
+Each row stores the Up and Down CLOB midpoint prices together, plus normalized probabilities and the raw probability sum. Do not infer Down as `1 - Up`; the raw CLOB midpoint pair can be unavailable, partial, affected by spread/fees, or otherwise not sum exactly to `1.0`. The normalized columns divide each returned midpoint by `up_probability + down_probability` when both sides are present.
+
+Probability sample quality is side-aware:
+
+| Quality | Meaning |
+| --- | --- |
+| `complete` | Both Up and Down midpoint values were returned for their token ids. |
+| `partial` | Exactly one side returned a usable midpoint. |
+| `missing` | Neither side was usable, or Gamma metadata/token ids were unavailable. |
+
+Rows also store `data_delay_ms` and `availability_status` so delayed opening observations are not confused with true on-time `0s` data. Opening retry rows can use `scheduled_at = market.start_time` with `availability_status = delayed_open` when the first usable CLOB midpoint pair arrived after the market had already started. Failed attempts are stored as `quality = missing` with nullable token ids when Gamma metadata or midpoint data is unavailable.
 
 Settlement metadata such as Chainlink `price_to_beat`, Chainlink `end_price`, and `winning_outcome` is refreshed from Gamma after close and can arrive later than `market.end_time`.
 

@@ -824,3 +824,13 @@ create table if not exists collection_errors (
 
 create index if not exists collection_errors_time_idx
   on collection_errors (time desc);
+
+create table if not exists live_state (
+  key text primary key,
+  updated_at timestamptz not null default now(),
+  market_id text,
+  payload jsonb not null
+);
+
+create index if not exists live_state_updated_at_idx
+  on live_state (updated_at desc);

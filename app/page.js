@@ -378,7 +378,10 @@ export default async function Home() {
           <p className="eyebrow">BTCUSDT 5 minute collector</p>
           <h1>Market collection console</h1>
         </div>
-        <div className="header-time">{formatUtc(new Date())}</div>
+        <div className="header-actions">
+          <Link className="download-link" href="/live">Live latest</Link>
+          <div className="header-time">{formatUtc(new Date())}</div>
+        </div>
       </header>
 
       <Heartbeat heartbeat={data.heartbeat} />
@@ -403,3 +406,4 @@ export default async function Home() {
     </main>
   );
 }
+

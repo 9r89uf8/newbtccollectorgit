@@ -30,6 +30,8 @@ import {
 } from "./forwardLabels.mjs";
 import { collectFuturesBasisSamplesForMarket } from "./futuresBasisSamples.mjs";
 import { startFuturesWebSocketSummaryCollector } from "./futuresWebSocketSummaries.mjs";
+import { startLiveDashboardServer } from "./liveServer.mjs";
+import { startLiveStateFlusher } from "./liveState.mjs";
 import { writeMarketBehaviorLabel } from "./marketBehaviorLabels.mjs";
 import { writeMarketClassification } from "./marketClassifications.mjs";
 import { writeMarketCvdBuckets } from "./marketCvdBuckets.mjs";
@@ -49,6 +51,7 @@ import {
   refreshPolymarketMarketMetadata,
   refreshRecentPolymarketSettlements,
 } from "./polymarketSamples.mjs";
+import { startPolymarketClobLiveCollector } from "./polymarketClobLive.mjs";
 import { collectPriceSamples } from "./priceSamples.mjs";
 import {
   getMarketWindow,
@@ -70,6 +73,9 @@ import {
 let stopping = false;
 let futuresWebSocketCollector = null;
 let polymarketChainlinkBtcPriceCollector = null;
+let polymarketClobLiveCollector = null;
+let liveStateFlusher = null;
+let liveDashboardServer = null;
 const ensuredBoundaryCloseStarts = new Set();
 const BOUNDARY_CLOSE_GRACE_MS = 15000;
 const pendingMarketClosures = new Map();
@@ -530,6 +536,14 @@ export async function runCollector() {
   console.log(`${COLLECTOR_NAME} starting for ${SYMBOL}`);
   await heartbeat(COLLECTOR_NAME, "running", null, "collector starting");
 
+  if (!liveStateFlusher) {
+    liveStateFlusher = startLiveStateFlusher();
+  }
+
+  if (!liveDashboardServer) {
+    liveDashboardServer = startLiveDashboardServer();
+  }
+
   if (
     ENABLE_FUTURES_MICROSTRUCTURE &&
     ENABLE_FUTURES_WEBSOCKET_SUMMARIES &&
@@ -540,6 +554,10 @@ export async function runCollector() {
 
   if (ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE && !polymarketChainlinkBtcPriceCollector) {
     polymarketChainlinkBtcPriceCollector = startPolymarketChainlinkBtcPriceCollector();
+  }
+
+  if (ENABLE_POLYMARKET_BTC_5M && !polymarketClobLiveCollector) {
+    polymarketClobLiveCollector = startPolymarketClobLiveCollector();
   }
 
   await closeDueMarkets();
@@ -621,6 +639,18 @@ export async function shutdown(signal) {
       await polymarketChainlinkBtcPriceCollector.stop();
       polymarketChainlinkBtcPriceCollector = null;
     }
+    if (polymarketClobLiveCollector) {
+      await polymarketClobLiveCollector.stop();
+      polymarketClobLiveCollector = null;
+    }
+    if (liveStateFlusher) {
+      await liveStateFlusher.stop();
+      liveStateFlusher = null;
+    }
+    if (liveDashboardServer) {
+      await liveDashboardServer.stop();
+      liveDashboardServer = null;
+    }
     await heartbeat(COLLECTOR_NAME, "stopped", null, `stopped by ${signal}`);
   } finally {
     await waitForPendingPolymarketOpeningRetries();
@@ -628,3 +658,5 @@ export async function shutdown(signal) {
     await closePool();
   }
 }
+
+

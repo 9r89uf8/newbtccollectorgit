@@ -20,6 +20,9 @@ const POLYMARKET_CLOB_BASE_URL = (
 const POLYMARKET_RTDS_WS_URL = (
   process.env.POLYMARKET_RTDS_WS_URL || "wss://ws-live-data.polymarket.com"
 ).replace(/\/+$/, "");
+const POLYMARKET_CLOB_WS_URL = (
+  process.env.POLYMARKET_CLOB_WS_URL || "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+).replace(/\/+$/, "");
 const POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL =
   process.env.POLYMARKET_RTDS_CHAINLINK_BTC_SYMBOL || "btc/usd";
 
@@ -76,6 +79,14 @@ export const POLYMARKET_RTDS_RECONNECT_MAX_MS = readPositiveNumber(
   30000
 );
 export const POLYMARKET_RTDS_STALE_MS = readPositiveNumber("POLYMARKET_RTDS_STALE_MS", 15000);
+export const POLYMARKET_CLOB_WS_PING_INTERVAL_MS = readPositiveNumber(
+  "POLYMARKET_CLOB_WS_PING_INTERVAL_MS",
+  10000
+);
+export const POLYMARKET_CLOB_WS_SYNC_INTERVAL_MS = readPositiveNumber(
+  "POLYMARKET_CLOB_WS_SYNC_INTERVAL_MS",
+  5000
+);
 export const POLYMARKET_METADATA_PREFETCH_LEAD_MS = readPositiveNumber(
   "POLYMARKET_METADATA_PREFETCH_LEAD_MS",
   60_000
@@ -94,6 +105,11 @@ export const ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE = readBoolean(
   "ENABLE_POLYMARKET_CHAINLINK_BTC_PRICE",
   true
 );
+export const ENABLE_LIVE_DASHBOARD = readBoolean("ENABLE_LIVE_DASHBOARD", true);
+export const LIVE_DASHBOARD_HOST = process.env.LIVE_DASHBOARD_HOST || "127.0.0.1";
+export const LIVE_DASHBOARD_PORT = readPositiveNumber("LIVE_DASHBOARD_PORT", 8787);
+export const LIVE_DASHBOARD_BROADCAST_MS = readPositiveNumber("LIVE_DASHBOARD_BROADCAST_MS", 500);
+export const LIVE_STATE_PERSIST_INTERVAL_MS = readPositiveNumber("LIVE_STATE_PERSIST_INTERVAL_MS", 1000);
 export const POSITION_SAMPLE_INTERVAL_MS = 5 * 1000;
 export const EXPECTED_POSITION_SAMPLES_PER_MARKET =
   MARKET_MS / POSITION_SAMPLE_INTERVAL_MS;
@@ -149,6 +165,12 @@ export const POLYMARKET_5M_BTC_SOURCE = {
   gammaMarketBySlugUrl: (slug) =>
     `${POLYMARKET_GAMMA_BASE_URL}/markets/slug/${encodeURIComponent(slug)}`,
   midpointsUrl: () => `${POLYMARKET_CLOB_BASE_URL}/midpoints`,
+};
+
+export const POLYMARKET_CLOB_WS_SOURCE = {
+  source: "polymarket_clob_ws",
+  instrumentType: "prediction_market",
+  url: POLYMARKET_CLOB_WS_URL,
 };
 
 export const POLYMARKET_RTDS_CHAINLINK_BTC_SOURCE = {
@@ -221,7 +243,7 @@ export const FUTURES_WEBSOCKET_SOURCE = {
   },
   marketStreams: () => {
     const streamSymbol = SYMBOL.toLowerCase();
-    return [`${streamSymbol}@forceOrder`];
+    return [`${streamSymbol}@aggTrade`, `${streamSymbol}@forceOrder`, `${streamSymbol}@markPrice@1s`];
   },
   connections: () => [
     {

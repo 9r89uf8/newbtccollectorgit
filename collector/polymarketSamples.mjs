@@ -423,6 +423,10 @@ async function ensurePolymarketMarket(market) {
   return refreshed;
 }
 
+export async function getPolymarketMarketMetadata(market) {
+  return ensurePolymarketMarket(market);
+}
+
 async function insertProbabilitySample(market, metadata, scheduledAt, sampleType, midpointResult) {
   const upProbability = readProbability(midpointResult.data[metadata.upTokenId]);
   const downProbability = readProbability(midpointResult.data[metadata.downTokenId]);
@@ -730,3 +734,5 @@ export async function getPolymarketProbabilitySampleStats(market) {
 
   return result.rows[0] || null;
 }
+
+

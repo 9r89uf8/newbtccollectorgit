@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getMarketDetailData } from "@/lib/marketDetailData.js";
-import MarketExportLink from "../../MarketExportLink.js";
+import MarketExportLink, { MarketBtcChainlinkExportLink } from "../../MarketExportLink.js";
 import MarketMicrostructureChart from "./MarketMicrostructureChart.js";
 
 export const dynamic = "force-dynamic";
@@ -1022,6 +1022,7 @@ export default async function MarketDetailPage({ params }) {
         <div className="heartbeat-meta">
           <Link className="download-link" href={`/markets/${encodeURIComponent(data.market.id)}/transition`}>Transition view</Link>
           <MarketExportLink marketId={data.market.id} />
+          <MarketBtcChainlinkExportLink marketId={data.market.id} />
           <span className={`status-pill ${statusClass(data.market.status)}`}>{data.market.status}</span>
           <span>{data.market.symbol}</span>
         </div>

@@ -5,7 +5,7 @@ import {
   LIVE_DASHBOARD_HOST,
   LIVE_DASHBOARD_PORT,
 } from "./config.mjs";
-import { getPublicLiveSnapshot } from "./liveState.mjs";
+import { getPublicLiveSnapshot, getWebsocketBtcPriceCsv } from "./liveState.mjs";
 import { recordError } from "./store.mjs";
 
 function writeSse(res, eventName, data) {
@@ -32,6 +32,18 @@ export function startLiveDashboardServer() {
       return;
     }
 
+    if (url.pathname === "/ws-btc-prices.csv") {
+      const seconds = Number(url.searchParams.get("seconds") || 300);
+      const windowMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 300_000;
+      const body = getWebsocketBtcPriceCsv(windowMs);
+      res.writeHead(200, {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": 'attachment; filename="websocket_btc_prices_last_5m.csv"',
+        "cache-control": "no-store",
+      });
+      res.end(body);
+      return;
+    }
     if (url.pathname === "/events") {
       res.writeHead(200, {
         "content-type": "text/event-stream; charset=utf-8",

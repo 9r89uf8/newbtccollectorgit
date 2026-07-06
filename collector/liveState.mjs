@@ -20,6 +20,7 @@ const POSITION_ROLLING_WINDOW_MS = 60_000;
 const MAX_POSITION_HISTORY_MS = 5 * 60_000;
 const MAX_HISTORY_POINTS = 900;
 const PRICE_TO_BEAT_CHAINLINK_GRACE_MS = 20_000;
+const WEBSOCKET_BTC_PRICE_HISTORY_MS = 5 * 60_000;
 
 const state = {
   market: null,
@@ -72,6 +73,7 @@ const state = {
   },
   currentBucket: createFlowBucket(bucketStartMs(Date.now())),
   flowHistory: [],
+  websocketBtcPriceHistory: [],
   marketFlow: createMarketFlowTotals(),
   continuousCvdQuote: 0,
   micropricePressureMarket: 0,
@@ -390,6 +392,62 @@ export function observePolymarketQuote({ marketId, side, bid, ask, lastTradePric
   updatePolymarketPairQuality();
 }
 
+function trimWebsocketBtcPriceHistory(nowMs = Date.now()) {
+  const cutoffMs = nowMs - WEBSOCKET_BTC_PRICE_HISTORY_MS;
+  while (
+    state.websocketBtcPriceHistory.length > 0 &&
+    state.websocketBtcPriceHistory[0].receivedAtMs < cutoffMs
+  ) {
+    state.websocketBtcPriceHistory.shift();
+  }
+}
+
+function recordWebsocketBtcPrice({ source, eventTimeMs, receivedAtMs, price }) {
+  if (!source || !Number.isFinite(eventTimeMs) || !Number.isFinite(receivedAtMs)) return;
+  if (!Number.isFinite(price) || price <= 0) return;
+
+  state.websocketBtcPriceHistory.push({
+    source,
+    eventTimeMs,
+    receivedAtMs,
+    price,
+  });
+  trimWebsocketBtcPriceHistory(receivedAtMs);
+}
+
+function csvCell(value) {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  if (!/[",\r\n]/.test(text)) return text;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+export function getWebsocketBtcPriceCsv(windowMs = WEBSOCKET_BTC_PRICE_HISTORY_MS) {
+  const nowMs = Date.now();
+  const safeWindowMs = Number.isFinite(Number(windowMs)) && Number(windowMs) > 0
+    ? Math.min(Number(windowMs), WEBSOCKET_BTC_PRICE_HISTORY_MS)
+    : WEBSOCKET_BTC_PRICE_HISTORY_MS;
+  const cutoffMs = nowMs - safeWindowMs;
+  trimWebsocketBtcPriceHistory(nowMs);
+
+  const columns = ["source", "event_time_utc", "received_at_utc", "price"];
+  const rows = state.websocketBtcPriceHistory
+    .filter((row) => row.receivedAtMs >= cutoffMs)
+    .sort((left, right) => left.receivedAtMs - right.receivedAtMs || left.source.localeCompare(right.source))
+    .map((row) => ({
+      source: row.source,
+      event_time_utc: toIso(row.eventTimeMs),
+      received_at_utc: toIso(row.receivedAtMs),
+      price: row.price,
+    }));
+
+  const lines = [
+    columns.join(","),
+    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(",")),
+  ];
+  return `${lines.join("\r\n")}\r\n`;
+}
+
 export function observeChainlinkTick(tick) {
   ensureCurrentMarket();
   const nowMs = Date.now();
@@ -409,6 +467,12 @@ export function observeChainlinkTick(tick) {
     ageMs,
     quality: qualityFromAge(ageMs, POLYMARKET_RTDS_STALE_MS),
   };
+  recordWebsocketBtcPrice({
+    source: "polymarket_rtds_chainlink_btc",
+    eventTimeMs: exchangeMs || serverMs || receivedMs,
+    receivedAtMs: receivedMs,
+    price,
+  });
   maybeSetOpeningPriceToBeat(price, exchangeMs || receivedMs);
 }
 
@@ -443,6 +507,12 @@ export function observeBinanceBookTicker(data) {
   state.binance.bookEventTs = eventTs;
   state.binance.bookReceivedTs = nowMs;
   state.binance.eventLagMs = Math.max(0, nowMs - eventTs);
+  recordWebsocketBtcPrice({
+    source: "binance_futures_book_ticker_mid",
+    eventTimeMs: eventTs,
+    receivedAtMs: nowMs,
+    price: mid,
+  });
 
   if (micropriceLean !== null) {
     state.currentBucket.micropriceLean = micropriceLean;

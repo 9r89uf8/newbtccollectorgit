@@ -38,7 +38,7 @@ export function startLiveDashboardServer() {
       const body = getWebsocketBtcPriceCsv(windowMs);
       res.writeHead(200, {
         "content-type": "text/csv; charset=utf-8",
-        "content-disposition": 'attachment; filename="websocket_btc_prices_last_5m.csv"',
+        "content-disposition": 'attachment; filename="websocket_btc_prices_1s_paired_last_5m.csv"',
         "cache-control": "no-store",
       });
       res.end(body);

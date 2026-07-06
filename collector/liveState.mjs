@@ -430,16 +430,54 @@ export function getWebsocketBtcPriceCsv(windowMs = WEBSOCKET_BTC_PRICE_HISTORY_M
   const cutoffMs = nowMs - safeWindowMs;
   trimWebsocketBtcPriceHistory(nowMs);
 
-  const columns = ["source", "event_time_utc", "received_at_utc", "price"];
-  const rows = state.websocketBtcPriceHistory
-    .filter((row) => row.receivedAtMs >= cutoffMs)
-    .sort((left, right) => left.receivedAtMs - right.receivedAtMs || left.source.localeCompare(right.source))
-    .map((row) => ({
-      source: row.source,
-      event_time_utc: toIso(row.eventTimeMs),
-      received_at_utc: toIso(row.receivedAtMs),
-      price: row.price,
-    }));
+  const bySecond = new Map();
+  for (const row of state.websocketBtcPriceHistory) {
+    if (row.receivedAtMs < cutoffMs || row.receivedAtMs > nowMs) continue;
+
+    const secondMs = Math.floor(row.receivedAtMs / 1000) * 1000;
+    const bucket = bySecond.get(secondMs) || {
+      second_utc: toIso(secondMs),
+      binance_futures_btc_price: null,
+      chainlink_btc_price: null,
+      binanceReceivedAtMs: null,
+      chainlinkReceivedAtMs: null,
+    };
+
+    if (
+      row.source === "binance_futures_book_ticker_mid" &&
+      (bucket.binanceReceivedAtMs === null || row.receivedAtMs >= bucket.binanceReceivedAtMs)
+    ) {
+      bucket.binance_futures_btc_price = row.price;
+      bucket.binanceReceivedAtMs = row.receivedAtMs;
+    }
+
+    if (
+      row.source === "polymarket_rtds_chainlink_btc" &&
+      (bucket.chainlinkReceivedAtMs === null || row.receivedAtMs >= bucket.chainlinkReceivedAtMs)
+    ) {
+      bucket.chainlink_btc_price = row.price;
+      bucket.chainlinkReceivedAtMs = row.receivedAtMs;
+    }
+
+    bySecond.set(secondMs, bucket);
+  }
+
+  const columns = ["second_utc", "binance_futures_btc_price", "chainlink_btc_price"];
+  const seconds = [...bySecond.keys()].sort((left, right) => left - right);
+  const rows = [];
+  if (seconds.length > 0) {
+    const firstSecondMs = Math.max(Math.ceil(cutoffMs / 1000) * 1000, seconds[0]);
+    const lastSecondMs = Math.floor(nowMs / 1000) * 1000;
+    for (let secondMs = firstSecondMs; secondMs <= lastSecondMs; secondMs += 1000) {
+      rows.push(
+        bySecond.get(secondMs) || {
+          second_utc: toIso(secondMs),
+          binance_futures_btc_price: null,
+          chainlink_btc_price: null,
+        }
+      );
+    }
+  }
 
   const lines = [
     columns.join(","),

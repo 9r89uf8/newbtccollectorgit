@@ -430,37 +430,47 @@ export function getWebsocketBtcPriceCsv(windowMs = WEBSOCKET_BTC_PRICE_HISTORY_M
   const cutoffMs = nowMs - safeWindowMs;
   trimWebsocketBtcPriceHistory(nowMs);
 
-  const events = state.websocketBtcPriceHistory
-    .filter((row) => row.receivedAtMs >= cutoffMs && row.receivedAtMs <= nowMs)
-    .sort((left, right) => left.receivedAtMs - right.receivedAtMs);
+  const events = state.websocketBtcPriceHistory.filter(
+    (row) => row.receivedAtMs >= cutoffMs && row.receivedAtMs <= nowMs
+  );
+  const binanceEvents = events
+    .filter((row) => row.source === "binance_futures_book_ticker_mid")
+    .sort((left, right) => left.eventTimeMs - right.eventTimeMs || left.receivedAtMs - right.receivedAtMs);
+  const chainlinkEvents = events
+    .filter((row) => row.source === "polymarket_rtds_chainlink_btc")
+    .sort((left, right) => left.eventTimeMs - right.eventTimeMs || left.receivedAtMs - right.receivedAtMs);
 
-  const columns = ["timestamp_utc", "binance_btc_price", "chainlink_btc_price"];
+  const columns = [
+    "timestamp_utc",
+    "binance_btc_price",
+    "chainlink_btc_price",
+    "binance_event_time_utc",
+    "chainlink_event_time_utc",
+    "binance_received_at_utc",
+    "chainlink_received_at_utc",
+  ];
   const rows = [];
-  if (events.length > 0) {
-    let eventIndex = 0;
-    let latestBinancePrice = null;
-    let latestChainlinkPrice = null;
-    const firstSecondMs = Math.max(Math.ceil(cutoffMs / 1000) * 1000, Math.floor(events[0].receivedAtMs / 1000) * 1000);
-    const lastSecondMs = Math.floor(nowMs / 1000) * 1000;
+  let binanceIndex = 0;
+  let latestBinance = null;
 
-    for (let secondMs = firstSecondMs; secondMs <= lastSecondMs; secondMs += 1000) {
-      const secondEndMs = secondMs + 999;
-      while (eventIndex < events.length && events[eventIndex].receivedAtMs <= secondEndMs) {
-        const event = events[eventIndex];
-        if (event.source === "binance_futures_book_ticker_mid") {
-          latestBinancePrice = event.price;
-        } else if (event.source === "polymarket_rtds_chainlink_btc") {
-          latestChainlinkPrice = event.price;
-        }
-        eventIndex += 1;
-      }
-
-      rows.push({
-        timestamp_utc: toIso(secondMs),
-        binance_btc_price: latestBinancePrice,
-        chainlink_btc_price: latestChainlinkPrice,
-      });
+  for (const chainlink of chainlinkEvents) {
+    while (
+      binanceIndex < binanceEvents.length &&
+      binanceEvents[binanceIndex].eventTimeMs <= chainlink.eventTimeMs
+    ) {
+      latestBinance = binanceEvents[binanceIndex];
+      binanceIndex += 1;
     }
+
+    rows.push({
+      timestamp_utc: toIso(chainlink.eventTimeMs),
+      binance_btc_price: latestBinance?.price ?? null,
+      chainlink_btc_price: chainlink.price,
+      binance_event_time_utc: toIso(latestBinance?.eventTimeMs),
+      chainlink_event_time_utc: toIso(chainlink.eventTimeMs),
+      binance_received_at_utc: toIso(latestBinance?.receivedAtMs),
+      chainlink_received_at_utc: toIso(chainlink.receivedAtMs),
+    });
   }
 
   const lines = [

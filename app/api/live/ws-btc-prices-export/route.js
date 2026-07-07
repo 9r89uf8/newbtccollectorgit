@@ -31,7 +31,7 @@ export async function GET(request) {
         "content-type": response.headers.get("content-type") || "text/csv; charset=utf-8",
         "content-disposition":
           response.headers.get("content-disposition") ||
-          'attachment; filename="websocket_btc_prices_1s_paired_last_5m.csv"',
+          'attachment; filename="websocket_btc_prices_chainlink_paired_last_5m.csv"',
         "cache-control": "no-store",
       },
     });

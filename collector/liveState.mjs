@@ -430,52 +430,36 @@ export function getWebsocketBtcPriceCsv(windowMs = WEBSOCKET_BTC_PRICE_HISTORY_M
   const cutoffMs = nowMs - safeWindowMs;
   trimWebsocketBtcPriceHistory(nowMs);
 
-  const bySecond = new Map();
-  for (const row of state.websocketBtcPriceHistory) {
-    if (row.receivedAtMs < cutoffMs || row.receivedAtMs > nowMs) continue;
+  const events = state.websocketBtcPriceHistory
+    .filter((row) => row.receivedAtMs >= cutoffMs && row.receivedAtMs <= nowMs)
+    .sort((left, right) => left.receivedAtMs - right.receivedAtMs);
 
-    const secondMs = Math.floor(row.receivedAtMs / 1000) * 1000;
-    const bucket = bySecond.get(secondMs) || {
-      second_utc: toIso(secondMs),
-      binance_futures_btc_price: null,
-      chainlink_btc_price: null,
-      binanceReceivedAtMs: null,
-      chainlinkReceivedAtMs: null,
-    };
-
-    if (
-      row.source === "binance_futures_book_ticker_mid" &&
-      (bucket.binanceReceivedAtMs === null || row.receivedAtMs >= bucket.binanceReceivedAtMs)
-    ) {
-      bucket.binance_futures_btc_price = row.price;
-      bucket.binanceReceivedAtMs = row.receivedAtMs;
-    }
-
-    if (
-      row.source === "polymarket_rtds_chainlink_btc" &&
-      (bucket.chainlinkReceivedAtMs === null || row.receivedAtMs >= bucket.chainlinkReceivedAtMs)
-    ) {
-      bucket.chainlink_btc_price = row.price;
-      bucket.chainlinkReceivedAtMs = row.receivedAtMs;
-    }
-
-    bySecond.set(secondMs, bucket);
-  }
-
-  const columns = ["second_utc", "binance_futures_btc_price", "chainlink_btc_price"];
-  const seconds = [...bySecond.keys()].sort((left, right) => left - right);
+  const columns = ["timestamp_utc", "binance_btc_price", "chainlink_btc_price"];
   const rows = [];
-  if (seconds.length > 0) {
-    const firstSecondMs = Math.max(Math.ceil(cutoffMs / 1000) * 1000, seconds[0]);
+  if (events.length > 0) {
+    let eventIndex = 0;
+    let latestBinancePrice = null;
+    let latestChainlinkPrice = null;
+    const firstSecondMs = Math.max(Math.ceil(cutoffMs / 1000) * 1000, Math.floor(events[0].receivedAtMs / 1000) * 1000);
     const lastSecondMs = Math.floor(nowMs / 1000) * 1000;
+
     for (let secondMs = firstSecondMs; secondMs <= lastSecondMs; secondMs += 1000) {
-      rows.push(
-        bySecond.get(secondMs) || {
-          second_utc: toIso(secondMs),
-          binance_futures_btc_price: null,
-          chainlink_btc_price: null,
+      const secondEndMs = secondMs + 999;
+      while (eventIndex < events.length && events[eventIndex].receivedAtMs <= secondEndMs) {
+        const event = events[eventIndex];
+        if (event.source === "binance_futures_book_ticker_mid") {
+          latestBinancePrice = event.price;
+        } else if (event.source === "polymarket_rtds_chainlink_btc") {
+          latestChainlinkPrice = event.price;
         }
-      );
+        eventIndex += 1;
+      }
+
+      rows.push({
+        timestamp_utc: toIso(secondMs),
+        binance_btc_price: latestBinancePrice,
+        chainlink_btc_price: latestChainlinkPrice,
+      });
     }
   }
 
